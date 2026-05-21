@@ -1,0 +1,17 @@
+[package]
+name = "ciane"
+version = "0.1.0"
+rust-version = "1.92.0"
+edition = "2024"
+authors = ["Hayden Stainsby <hds@caffeineconcepts.com>"]
+readme = "README.md"
+description = """
+Parser for the ciane workflow language.
+"""
+categories = ["parser-implementations"]
+keywords = ["ci", "ci/cd"]
+
+[dependencies]
+
+[lints]
+workspace = true

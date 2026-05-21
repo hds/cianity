@@ -1,0 +1,14 @@
+[workspace]
+resolver = "3"
+members = [
+    "ciane",
+    "cianity",
+]
+
+[workspace.lints.clippy]
+cargo = { level = "deny", priority = -1 }
+complexity = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
+perf = { level = "deny", priority = -1 }
+style = { level = "deny", priority = -1 }
+suspicious = { level = "deny", priority = -1 }
