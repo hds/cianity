@@ -12,3 +12,5 @@ pedantic = { level = "deny", priority = -1 }
 perf = { level = "deny", priority = -1 }
 style = { level = "deny", priority = -1 }
 suspicious = { level = "deny", priority = -1 }
+# Transitive dependency version conflicts are outside our control
+multiple-crate-versions = "allow"

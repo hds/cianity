@@ -8,6 +8,8 @@ readme = "README.md"
 description = """
 Add a bit of sanity to your CI.
 """
+license = "MIT"
+repository = "https://github.com/hds/cianity"
 categories = ["development-tools"]
 keywords = ["ci", "ci/cd"]
 
