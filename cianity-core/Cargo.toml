@@ -1,12 +1,12 @@
 [package]
-name = "cianity"
+name = "cianity-core"
 version = "0.1.0"
 rust-version = "1.92.0"
 edition = "2024"
 authors = ["Hayden Stainsby <hds@caffeineconcepts.com>"]
 readme = "README.md"
 description = """
-Add a bit of sanity to your CI.
+Core check logic for the cianity CI workflow tool.
 """
 license = "MIT"
 repository = "https://github.com/hds/cianity"
@@ -15,11 +15,7 @@ keywords = ["ci", "ci/cd"]
 
 [dependencies]
 ciane = { path = "../ciane" }
-cianity-core = { path = "../cianity-core" }
 ariadne = "0.6"
-clap = { version = "4.6", features = ["derive"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std"] }
-tower-lsp-server = "0.23"
 anyhow = "1"
 
 [lints]

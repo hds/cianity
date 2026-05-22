@@ -1,0 +1,7 @@
+stage build {
+    job compile { cargo build }
+}
+
+stage build {
+    job test { cargo test }
+}

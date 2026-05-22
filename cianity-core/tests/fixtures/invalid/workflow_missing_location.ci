@@ -1,0 +1,7 @@
+use {
+    workflow(name = shared)
+}
+
+stage build {
+    job compile { cargo build }
+}
