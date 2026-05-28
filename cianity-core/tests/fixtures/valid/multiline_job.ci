@@ -1,0 +1,16 @@
+stage build {
+    job build {
+        cargo check
+        cargo build
+    }
+}
+
+stage test {
+    job test [
+        step setup { cargo binstall --strategies crate-meta-data cargo-nextest }
+        step run {
+            cargo nextest run
+            cargo test --doc
+        }
+    ]
+}

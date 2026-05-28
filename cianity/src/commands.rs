@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::Target;
 
@@ -12,7 +12,21 @@ pub fn check(path: &Path) -> anyhow::Result<()> {
     cianity_core::check::run(path)
 }
 
-/// Format a `ciane` source file (or check that it is already formatted).
-pub fn format(_path: &Path, _check_only: bool) -> anyhow::Result<()> {
-    anyhow::bail!("the `format` command is not yet implemented")
+/// Format one or more `ciane` source files (or check that they are already formatted).
+///
+/// All files are processed even if one fails; returns `Err` if any file could
+/// not be formatted.
+pub fn format(paths: &[PathBuf], check_only: bool) -> anyhow::Result<()> {
+    let mut had_error = false;
+    for path in paths {
+        if let Err(e) = cianity_core::format::run(path, check_only) {
+            eprintln!("error: {e}");
+            had_error = true;
+        }
+    }
+    if had_error {
+        anyhow::bail!("one or more files had format errors");
+    }
+
+    Ok(())
 }

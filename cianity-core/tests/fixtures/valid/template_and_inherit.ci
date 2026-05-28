@@ -2,11 +2,11 @@ stage test {
     template base [
         step setup { rustup update }
         step build { cargo build }
-        step run   { cargo test }
+        step run { cargo test }
     ]
 
     job unit(inherit = base) [
-        steps
+        steps,
     ]
 
     job integration(inherit = base) [

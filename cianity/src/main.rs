@@ -28,11 +28,12 @@ enum Command {
         #[arg(long)]
         target: Target,
     },
-    /// Format a ciane workflow file.
+    /// Format one or more ciane workflow files.
     Format {
-        /// The `.ci` or `.ciane` file to format.
-        file: PathBuf,
-        /// Only check whether the file is formatted; do not modify it.
+        /// The `.ci` or `.ciane` files to format.
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+        /// Only check whether the files are formatted; do not modify them.
         #[arg(long)]
         check: bool,
     },
@@ -55,7 +56,7 @@ fn main() -> ExitCode {
     let result = match cli.command {
         Command::Check { file } => commands::check(&file),
         Command::Build { file, target } => commands::build(&file, target),
-        Command::Format { file, check } => commands::format(&file, check),
+        Command::Format { files, check } => commands::format(&files, check),
         Command::Lsp => {
             tokio::runtime::Builder::new_multi_thread()
                 .enable_all()

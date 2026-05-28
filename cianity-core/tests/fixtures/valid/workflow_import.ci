@@ -3,9 +3,7 @@ use {
 }
 
 stage build {
-    job compile {
-        cargo build --release
-    }
+    job compile { cargo build --release }
 }
 
 stage test (
