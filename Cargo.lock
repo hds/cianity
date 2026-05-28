@@ -159,6 +159,7 @@ dependencies = [
  "ciane",
  "cianity-core",
  "clap",
+ "rowan",
  "tokio",
  "tower-lsp-server",
 ]

@@ -6,8 +6,12 @@ stage build {
 }
 
 stage test {
-    job test [
+    template test_setup [
         step setup { cargo binstall --strategies crate-meta-data cargo-nextest }
+    ]
+
+    job test(inherit = test_setup, image = ubuntu:22.04) [
+        step setup,
         step run {
             cargo nextest run
             cargo test --doc

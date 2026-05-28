@@ -21,6 +21,7 @@ clap = { version = "4.6", features = ["derive"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std"] }
 tower-lsp-server = "0.23"
 anyhow = "1"
+rowan = "0.16"
 
 [lints]
 workspace = true
