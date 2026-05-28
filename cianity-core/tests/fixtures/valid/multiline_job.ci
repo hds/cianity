@@ -1,5 +1,5 @@
 stage build {
-    job build {
+    job build ( image = rockylinux:9 ) {
         cargo check
         cargo build
     }
@@ -10,7 +10,10 @@ stage test {
         step setup { cargo binstall --strategies crate-meta-data cargo-nextest }
     ]
 
-    job test(inherit = test_setup, image = ubuntu:22.04) [
+    job test (
+        inherit = test_setup,
+        image = ubuntu:22.04,
+    ) [
         step setup,
         step run {
             cargo nextest run

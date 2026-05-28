@@ -74,7 +74,7 @@ impl Printer {
     fn print_workflow_import(&mut self, import: &WorkflowImport) {
         self.push_str("workflow");
         if let Some(attrs) = import.attr_list() {
-            self.print_attr_list_inline(&attrs);
+            self.print_attr_list(&attrs);
         }
     }
 
@@ -84,11 +84,9 @@ impl Printer {
         self.push_str("stage ");
         self.push_str(stage.name().as_deref().unwrap_or(""));
         if let Some(attrs) = stage.attr_list() {
-            self.print_attr_list_multiline(&attrs);
-            self.push_str(" {");
-        } else {
-            self.push_str(" {");
+            self.print_attr_list(&attrs);
         }
+        self.push_str(" {");
         if let Some(body) = stage.body() {
             self.print_stage_body(&body);
         }
@@ -137,7 +135,7 @@ impl Printer {
         self.push_str("job ");
         self.push_str(job.name().as_deref().unwrap_or(""));
         if let Some(attrs) = job.attr_list() {
-            self.print_attr_list_inline(&attrs);
+            self.print_attr_list(&attrs);
         }
         if let Some(body) = job.inline_body() {
             self.push(' ');
@@ -244,8 +242,17 @@ impl Printer {
 
     // ── attribute lists ──────────────────────────────────────────────────────
 
+    /// Chooses inline or multiline layout based on attribute count.
+    fn print_attr_list(&mut self, attrs: &AttrList) {
+        if attrs.attrs().count() == 1 {
+            self.print_attr_list_inline(attrs);
+        } else {
+            self.print_attr_list_multiline(attrs);
+        }
+    }
+
     fn print_attr_list_inline(&mut self, attrs: &AttrList) {
-        self.push('(');
+        self.push_str(" ( ");
         let mut first = true;
         for attr in attrs.attrs() {
             if first {
@@ -255,7 +262,7 @@ impl Printer {
             }
             self.print_attr(&attr);
         }
-        self.push(')');
+        self.push_str(" )");
     }
 
     fn print_attr_list_multiline(&mut self, attrs: &AttrList) {

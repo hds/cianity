@@ -45,7 +45,7 @@ fn stage_with_attr_list() {
     let out = format(src);
     assert_eq!(
         out,
-        "stage test (\n    dependencies = [build.compile],\n) {\n    job run { cargo test }\n}\n"
+        "stage test ( dependencies = [build.compile] ) {\n    job run { cargo test }\n}\n"
     );
     check_idempotent(src);
 }
@@ -54,7 +54,10 @@ fn stage_with_attr_list() {
 fn use_block() {
     let src = "use { workflow(location=./a.ci,name=a) }";
     let out = format(src);
-    assert_eq!(out, "use {\n    workflow(location = ./a.ci, name = a)\n}\n");
+    assert_eq!(
+        out,
+        "use {\n    workflow (\n        location = ./a.ci,\n        name = a,\n    )\n}\n"
+    );
     check_idempotent(src);
 }
 

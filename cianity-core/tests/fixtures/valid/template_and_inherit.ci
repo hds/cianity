@@ -5,11 +5,11 @@ stage test {
         step run { cargo test }
     ]
 
-    job unit(inherit = base) [
+    job unit ( inherit = base ) [
         steps,
     ]
 
-    job integration(inherit = base) [
+    job integration ( inherit = base ) [
         step setup,
         step build,
         step run { cargo test --test '*' }
