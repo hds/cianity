@@ -154,6 +154,9 @@ fn inherit_tokens_matching(stage: &Stage, tmpl_name: &str) -> Vec<SyntaxToken> {
 fn dep_ref_job_tokens(root: &Root, stage_name: &str, job_name: &str) -> Vec<SyntaxToken> {
     let mut tokens = Vec::new();
     for stage in root.stages() {
+        if let Some(al) = stage.attr_list() {
+            collect_matching_dep_tokens(&al, stage_name, job_name, &mut tokens);
+        }
         let Some(body) = stage.body() else {
             continue;
         };
@@ -161,30 +164,39 @@ fn dep_ref_job_tokens(root: &Root, stage_name: &str, job_name: &str) -> Vec<Synt
             let Some(al) = job.attr_list() else {
                 continue;
             };
-            for attr in al.attrs() {
-                if attr.key_text().as_deref() != Some("dependencies") {
-                    continue;
-                }
-                let Some(av) = attr.value() else {
-                    continue;
-                };
-                let Some(rl) = av.ref_list() else {
-                    continue;
-                };
-                for r in rl.refs() {
-                    let (first, second) = ref_idents_of(r.syntax());
-                    if let Some(f) = first
-                        && f.text() == stage_name
-                        && let Some(s) = second
-                        && s.text() == job_name
-                    {
-                        tokens.push(s);
-                    }
-                }
-            }
+            collect_matching_dep_tokens(&al, stage_name, job_name, &mut tokens);
         }
     }
     tokens
+}
+
+fn collect_matching_dep_tokens(
+    al: &ciane::ast::AttrList,
+    stage_name: &str,
+    job_name: &str,
+    tokens: &mut Vec<SyntaxToken>,
+) {
+    for attr in al.attrs() {
+        if attr.key_text().as_deref() != Some("dependencies") {
+            continue;
+        }
+        let Some(av) = attr.value() else {
+            continue;
+        };
+        let Some(rl) = av.ref_list() else {
+            continue;
+        };
+        for r in rl.refs() {
+            let (first, second) = ref_idents_of(r.syntax());
+            if let Some(f) = first
+                && f.text() == stage_name
+                && let Some(s) = second
+                && s.text() == job_name
+            {
+                tokens.push(s);
+            }
+        }
+    }
 }
 
 fn is_dependency_ref(ref_node: &SyntaxNode) -> bool {
