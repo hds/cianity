@@ -1,0 +1,43 @@
+{
+  "name": "vscode-ciane",
+  "displayName": "Ciane",
+  "description": "Language support for the ciane CI workflow language",
+  "version": "0.1.0",
+  "publisher": "cianity",
+  "repository": "https://github.com/hds/cianity",
+  "engines": { "vscode": "^1.75.0" },
+  "categories": ["Programming Languages"],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "ciane",
+        "aliases": ["Ciane", "ciane"],
+        "extensions": [".ciane", ".ci"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "ciane",
+        "scopeName": "source.ciane",
+        "path": "./syntaxes/ciane.tmLanguage.json"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "npm run compile && vsce package"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^18.0.0",
+    "@types/vscode": "^1.75.0",
+    "@vscode/vsce": "^3.0.0",
+    "typescript": "^5.0.0"
+  }
+}

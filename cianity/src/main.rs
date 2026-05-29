@@ -38,7 +38,11 @@ enum Command {
         check: bool,
     },
     /// Start the ciane language server (communicates over stdin/stdout).
-    Lsp,
+    Lsp {
+        /// Use stdin/stdout transport (passed by some LSP clients; always the case).
+        #[arg(long)]
+        stdio: bool,
+    },
 }
 
 /// Target CI system for the `build` command.
@@ -57,7 +61,7 @@ fn main() -> ExitCode {
         Command::Check { file } => commands::check(&file),
         Command::Build { file, target } => commands::build(&file, target),
         Command::Format { files, check } => commands::format(&files, check),
-        Command::Lsp => {
+        Command::Lsp { .. } => {
             tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()
