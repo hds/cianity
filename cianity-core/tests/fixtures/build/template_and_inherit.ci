@@ -1,0 +1,17 @@
+stage test {
+    template base [
+        step setup { rustup update }
+        step build { cargo build }
+        step run { cargo test }
+    ]
+
+    job unit ( inherit = base ) [
+        steps,
+    ]
+
+    job integration ( inherit = base ) [
+        step setup,
+        step build,
+        step run { cargo test --test '*' }
+    ]
+}

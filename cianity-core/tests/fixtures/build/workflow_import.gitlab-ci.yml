@@ -1,0 +1,13 @@
+stages:
+  - build
+  - test
+
+compile:
+  stage: build
+  script:
+    - cargo build --release
+
+run:
+  stage: test
+  script:
+    - cargo test

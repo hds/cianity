@@ -1,0 +1,20 @@
+stage build {
+    job compile ( image = rust:1.75 ) { cargo build --release }
+
+    job lint (
+        image = rust:1.75,
+        dependencies = [build.compile],
+    ) { cargo clippy -- -D warnings }
+}
+
+stage test {
+    job unit (
+        image = rust:latest,
+        dependencies = [build.compile],
+    ) { cargo test }
+
+    job integration (
+        image = rust:latest,
+        dependencies = [build.compile, test.unit],
+    ) { cargo test --test integration }
+}

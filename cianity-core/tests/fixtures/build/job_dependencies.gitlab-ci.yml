@@ -1,0 +1,34 @@
+stages:
+  - build
+  - test
+
+compile:
+  stage: build
+  image: "rust:1.75"
+  script:
+    - cargo build --release
+
+lint:
+  stage: build
+  image: "rust:1.75"
+  needs:
+    - job: compile
+  script:
+    - cargo clippy -- -D warnings
+
+unit:
+  stage: test
+  image: "rust:latest"
+  needs:
+    - job: compile
+  script:
+    - cargo test
+
+integration:
+  stage: test
+  image: "rust:latest"
+  needs:
+    - job: compile
+    - job: unit
+  script:
+    - cargo test --test integration

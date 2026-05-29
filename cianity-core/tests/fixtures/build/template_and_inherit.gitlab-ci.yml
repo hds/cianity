@@ -1,0 +1,16 @@
+stages:
+  - test
+
+unit:
+  stage: test
+  script:
+    - rustup update
+    - cargo build
+    - cargo test
+
+integration:
+  stage: test
+  script:
+    - rustup update
+    - cargo build
+    - cargo test --test '*'

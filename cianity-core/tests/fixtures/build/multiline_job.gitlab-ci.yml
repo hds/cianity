@@ -1,0 +1,20 @@
+stages:
+  - build
+  - test
+
+build:
+  stage: build
+  image: "rockylinux:9"
+  script:
+    - |
+      cargo check
+      cargo build
+
+test:
+  stage: test
+  image: "ubuntu:22.04"
+  script:
+    - cargo binstall --strategies crate-meta-data cargo-nextest
+    - |
+      cargo nextest run
+      cargo test --doc

@@ -1,0 +1,31 @@
+stages:
+  - build
+  - test
+
+build.compile:
+  stage: build
+  image: "rust:1.75"
+  script:
+    - cargo build
+
+build.check:
+  stage: build
+  image: "rust:1.75"
+  script:
+    - cargo clippy
+
+test.compile:
+  stage: test
+  image: "rust:latest"
+  needs:
+    - job: build.compile
+  script:
+    - cargo test
+
+test.check:
+  stage: test
+  image: "rust:latest"
+  needs:
+    - job: test.compile
+  script:
+    - cargo check

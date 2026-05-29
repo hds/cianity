@@ -25,8 +25,11 @@ enum Command {
         /// The `.ci` or `.ciane` file to build.
         file: PathBuf,
         /// The target CI system.
-        #[arg(long)]
+        #[arg(short, long)]
         target: Target,
+        /// Output file path (defaults to `.gitlab-ci.yml` next to the input file).
+        #[arg(short, long)]
+        output: Option<PathBuf>,
     },
     /// Format one or more ciane workflow files.
     Format {
@@ -46,7 +49,7 @@ enum Command {
 }
 
 /// Target CI system for the `build` command.
-#[derive(Clone, ValueEnum)]
+#[derive(Clone, Copy, ValueEnum)]
 pub enum Target {
     /// GitLab CI
     Gitlab,
@@ -59,7 +62,11 @@ fn main() -> ExitCode {
 
     let result = match cli.command {
         Command::Check { file } => commands::check(&file),
-        Command::Build { file, target } => commands::build(&file, target),
+        Command::Build {
+            file,
+            target,
+            output,
+        } => commands::build(&file, target, output.as_deref()),
         Command::Format { files, check } => commands::format(&files, check),
         Command::Lsp { .. } => {
             tokio::runtime::Builder::new_multi_thread()

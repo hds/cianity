@@ -3,8 +3,14 @@ use std::path::{Path, PathBuf};
 use crate::Target;
 
 /// Build a `ciane` workflow file into CI-system YAML.
-pub fn build(_path: &Path, _target: Target) -> anyhow::Result<()> {
-    anyhow::bail!("the `build` command is not yet implemented")
+pub fn build(path: &Path, target: Target, output: Option<&Path>) -> anyhow::Result<()> {
+    let core_target = match target {
+        Target::Gitlab => cianity_core::build::Target::Gitlab,
+        Target::Github => anyhow::bail!("GitHub Actions target is not yet implemented"),
+    };
+    let out_path = cianity_core::build::run(path, core_target, output)?;
+    println!("wrote {}", out_path.display());
+    Ok(())
 }
 
 /// Check a `ciane` workflow file for errors.
