@@ -17,17 +17,13 @@ if !has('nvim')
 endif
 
 lua << EOF
--- Locate the workspace root by walking up from the current buffer's directory.
+-- Locate the workspace root by walking up from the current buffer's directory,
+-- looking for workflow.ci (preferred) or .workflow.ci.
 local function find_root()
   local buf_path = vim.api.nvim_buf_get_name(0)
   local start_dir = vim.fn.fnamemodify(buf_path, ':p:h')
 
-  -- vim.fs.root was added in Neovim 0.10; fall back to vim.fs.find otherwise.
-  if vim.fs.root then
-    return vim.fs.root(0, { '.git', '.jj' }) or vim.fn.getcwd()
-  end
-
-  local markers = vim.fs.find({ '.git', '.jj' }, {
+  local markers = vim.fs.find({ 'workflow.ci', '.workflow.ci' }, {
     upward = true,
     path   = start_dir,
   })
