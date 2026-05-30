@@ -1,0 +1,6 @@
+stage test {
+    template base [
+        step setup { rustup update }
+        step run { cargo test }
+    ]
+}

@@ -1,0 +1,12 @@
+use {
+    workflow (
+        location = ../shared/nonexistent.ci,
+        name = shared,
+    )
+}
+
+stage test {
+    job unit ( inherit = shared/base ) [
+        steps,
+    ]
+}

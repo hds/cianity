@@ -1,8 +1,9 @@
-use std::path::Path;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 use ariadne::{Color, Label, Report, ReportKind, Source};
 use ciane::{
-    ast::{AstNode, Root},
+    ast::{AstNode, HasAttrList, HasName, Root},
     error::{Diagnostic, Severity},
     parse,
     validation::validate,
@@ -45,6 +46,7 @@ pub fn run(path: &Path) -> anyhow::Result<()> {
             }
             print_diagnostic(&filename, &source, &diag);
         }
+        check_cross_file_inherits(&root, path, &filename, &source, &mut has_error);
     }
 
     if has_error {
@@ -52,6 +54,130 @@ pub fn run(path: &Path) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+fn check_cross_file_inherits(
+    root: &Root,
+    path: &Path,
+    filename: &str,
+    source: &str,
+    has_error: &mut bool,
+) {
+    let base = path.parent().unwrap_or(Path::new("."));
+    let imports = build_import_map(root, base);
+
+    for stage in root.stages() {
+        let Some(body) = stage.body() else { continue };
+        for job in body.jobs() {
+            let Some(al) = job.attr_list() else { continue };
+            for attr in al.attrs() {
+                if attr.key_text().as_deref() != Some("inherit") {
+                    continue;
+                }
+                let Some(value) = attr.value_text() else {
+                    continue;
+                };
+                let Some((import_name, template_name)) = value.split_once('/') else {
+                    continue;
+                };
+                let span = {
+                    let r = attr.syntax().text_range();
+                    usize::from(r.start())..usize::from(r.end())
+                };
+                if let Some(file_path) = imports.get(import_name) {
+                    if file_path.exists() {
+                        match template_exists_in_file(file_path, template_name) {
+                            Ok(true) => {}
+                            Ok(false) => {
+                                *has_error = true;
+                                print_diagnostic(
+                                    filename,
+                                    source,
+                                    &Diagnostic {
+                                        severity: Severity::Error,
+                                        message: format!(
+                                            "template `{template_name}` not found \
+                                             in import `{import_name}`"
+                                        ),
+                                        span,
+                                    },
+                                );
+                            }
+                            Err(e) => {
+                                *has_error = true;
+                                print_diagnostic(
+                                    filename,
+                                    source,
+                                    &Diagnostic {
+                                        severity: Severity::Error,
+                                        message: format!(
+                                            "failed to read import `{import_name}`: {e}"
+                                        ),
+                                        span,
+                                    },
+                                );
+                            }
+                        }
+                    } else {
+                        *has_error = true;
+                        print_diagnostic(
+                            filename,
+                            source,
+                            &Diagnostic {
+                                severity: Severity::Error,
+                                message: format!(
+                                    "import `{import_name}` references `{}`, \
+                                     but that file does not exist",
+                                    file_path.display()
+                                ),
+                                span,
+                            },
+                        );
+                    }
+                } else {
+                    *has_error = true;
+                    print_diagnostic(
+                        filename,
+                        source,
+                        &Diagnostic {
+                            severity: Severity::Error,
+                            message: format!(
+                                "inherit references import `{import_name}`, but no such \
+                                 import exists in the `use` block"
+                            ),
+                            span,
+                        },
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn build_import_map(root: &Root, base: &Path) -> HashMap<String, PathBuf> {
+    let mut map = HashMap::new();
+    for ub in root.use_blocks() {
+        for imp in ub.imports() {
+            if let Some((name, loc)) = imp.name().zip(imp.location()) {
+                map.insert(name.to_string(), base.join(loc.as_str()));
+            }
+        }
+    }
+    map
+}
+
+fn template_exists_in_file(path: &Path, template_name: &str) -> anyhow::Result<bool> {
+    let source =
+        std::fs::read_to_string(path).map_err(|e| anyhow::anyhow!("cannot read file: {e}"))?;
+    let result = parse(&source);
+    let root =
+        Root::cast(result.syntax()).ok_or_else(|| anyhow::anyhow!("internal: no Root node"))?;
+    Ok(root.stages().any(|s| {
+        s.body().is_some_and(|b| {
+            b.templates()
+                .any(|t| t.name().as_deref() == Some(template_name))
+        })
+    }))
 }
 
 fn print_diagnostic(filename: &str, source: &str, diag: &Diagnostic) {
