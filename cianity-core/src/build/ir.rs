@@ -62,7 +62,7 @@ impl Job {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct JobRef {
     pub stage: String,
     pub job: String,
@@ -70,7 +70,12 @@ pub struct JobRef {
 
 // ─── Lowering ────────────────────────────────────────────────────────────────
 
-type TemplateSteps = Vec<(String, String)>;
+#[derive(Clone, Default)]
+struct TemplateData {
+    steps: Vec<(String, String)>,
+    image: Option<String>,
+    needs: Vec<JobRef>,
+}
 
 /// Lower a parsed `Root` AST node into the rich IR `Workflow`.
 ///
@@ -82,76 +87,35 @@ pub fn lower(root: &Root) -> Workflow {
 
     for stage in root.stages() {
         let stage_name = stage.name().map_or_else(String::new, |s| s.to_string());
-
         let Some(body) = stage.body() else {
             continue;
         };
 
-        let templates: HashMap<String, TemplateSteps> = body
-            .templates()
-            .filter_map(|t| {
-                let name = t.name()?.to_string();
-                let steps = t
-                    .body()
-                    .map_or_else(Vec::new, |b| collect_template_steps(&b));
-                Some((name, steps))
-            })
-            .collect();
-
+        let templates = collect_local_templates(&body);
         let mut jobs = Vec::new();
+
         for job in body.jobs() {
             let job_name = job.name().map_or_else(String::new, |s| s.to_string());
+            let (mut image, inherit, mut needs) = parse_job_attrs(&job);
 
-            let mut image: Option<String> = None;
-            let mut inherit: Option<String> = None;
-            let mut needs: Vec<JobRef> = Vec::new();
-
-            if let Some(attr_list) = job.attr_list() {
-                for attr in attr_list.attrs() {
-                    match attr.key_text().as_deref() {
-                        Some("image") => {
-                            image = attr.value_text().map(|s| s.to_string());
-                        }
-                        Some("inherit") => {
-                            inherit = attr.value_text().map(|s| s.to_string());
-                        }
-                        Some("dependencies") => {
-                            if let Some(val) = attr.value()
-                                && let Some(ref_list) = val.ref_list()
-                            {
-                                for r in ref_list.refs() {
-                                    let text = r.text();
-                                    if let Some((s, j)) = text.split_once('.') {
-                                        needs.push(JobRef {
-                                            stage: s.to_string(),
-                                            job: j.to_string(),
-                                        });
-                                    }
-                                }
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-
-            let empty: TemplateSteps = Vec::new();
-            let template_steps: &TemplateSteps = inherit
+            let template_data = inherit
                 .as_deref()
                 .filter(|t| !t.contains('/'))
-                .and_then(|t| templates.get(t))
-                .unwrap_or(&empty);
+                .and_then(|t| templates.get(t));
 
-            let script = if let Some(inline) = job.inline_body() {
-                inline
-                    .shell_text()
-                    .map(|s| vec![dedent(&s)])
-                    .unwrap_or_default()
-            } else if let Some(steps_body) = job.steps_body() {
-                resolve_steps(&steps_body, template_steps)
-            } else {
-                Vec::new()
-            };
+            if image.is_none() {
+                image = template_data.and_then(|td| td.image.clone());
+            }
+            if needs.is_empty()
+                && let Some(td) = template_data
+            {
+                needs.clone_from(&td.needs);
+            }
+
+            let empty: Vec<(String, String)> = Vec::new();
+            let template_steps = template_data.map_or(empty.as_slice(), |td| td.steps.as_slice());
+
+            let script = job_script(&job, template_steps);
 
             jobs.push(Job {
                 name: job_name,
@@ -183,65 +147,22 @@ pub fn lower(root: &Root) -> Workflow {
 pub fn lower_with_path(root: &Root, path: &Path) -> anyhow::Result<Workflow> {
     let base = path.parent().unwrap_or(Path::new("."));
     let import_map = build_import_map(root, base);
-
     let mut stages = Vec::new();
 
     for stage in root.stages() {
         let stage_name = stage.name().map_or_else(String::new, |s| s.to_string());
-
         let Some(body) = stage.body() else {
             continue;
         };
 
-        let templates: HashMap<String, TemplateSteps> = body
-            .templates()
-            .filter_map(|t| {
-                let name = t.name()?.to_string();
-                let steps = t
-                    .body()
-                    .map_or_else(Vec::new, |b| collect_template_steps(&b));
-                Some((name, steps))
-            })
-            .collect();
-
+        let templates = collect_local_templates(&body);
         let mut jobs = Vec::new();
+
         for job in body.jobs() {
             let job_name = job.name().map_or_else(String::new, |s| s.to_string());
+            let (mut image, inherit, mut needs) = parse_job_attrs(&job);
 
-            let mut image: Option<String> = None;
-            let mut inherit: Option<String> = None;
-            let mut needs: Vec<JobRef> = Vec::new();
-
-            if let Some(attr_list) = job.attr_list() {
-                for attr in attr_list.attrs() {
-                    match attr.key_text().as_deref() {
-                        Some("image") => {
-                            image = attr.value_text().map(|s| s.to_string());
-                        }
-                        Some("inherit") => {
-                            inherit = attr.value_text().map(|s| s.to_string());
-                        }
-                        Some("dependencies") => {
-                            if let Some(val) = attr.value()
-                                && let Some(ref_list) = val.ref_list()
-                            {
-                                for r in ref_list.refs() {
-                                    let text = r.text();
-                                    if let Some((s, j)) = text.split_once('.') {
-                                        needs.push(JobRef {
-                                            stage: s.to_string(),
-                                            job: j.to_string(),
-                                        });
-                                    }
-                                }
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-
-            let template_steps: TemplateSteps = if let Some(name) = inherit.as_deref() {
+            let template_data: TemplateData = if let Some(name) = inherit.as_deref() {
                 if let Some((import_name, template_name)) = name.split_once('/') {
                     let file_path = import_map
                         .get(import_name)
@@ -251,19 +172,17 @@ pub fn lower_with_path(root: &Root, path: &Path) -> anyhow::Result<Workflow> {
                     templates.get(name).cloned().unwrap_or_default()
                 }
             } else {
-                Vec::new()
+                TemplateData::default()
             };
 
-            let script = if let Some(inline) = job.inline_body() {
-                inline
-                    .shell_text()
-                    .map(|s| vec![dedent(&s)])
-                    .unwrap_or_default()
-            } else if let Some(steps_body) = job.steps_body() {
-                resolve_steps(&steps_body, &template_steps)
-            } else {
-                Vec::new()
-            };
+            if image.is_none() {
+                image.clone_from(&template_data.image);
+            }
+            if needs.is_empty() {
+                needs.clone_from(&template_data.needs);
+            }
+
+            let script = job_script(&job, &template_data.steps);
 
             jobs.push(Job {
                 name: job_name,
@@ -283,6 +202,94 @@ pub fn lower_with_path(root: &Root, path: &Path) -> anyhow::Result<Workflow> {
     Ok(Workflow { stages })
 }
 
+// ─── helpers ─────────────────────────────────────────────────────────────────
+
+fn collect_local_templates(body: &ast::StageBody) -> HashMap<String, TemplateData> {
+    body.templates()
+        .filter_map(|t| {
+            let name = t.name()?.to_string();
+            Some((name, template_data_from_ast(&t)))
+        })
+        .collect()
+}
+
+fn template_data_from_ast(tmpl: &ast::TemplateDef) -> TemplateData {
+    let steps = tmpl
+        .body()
+        .map_or_else(Vec::new, |b| collect_template_steps(&b));
+    let mut image = None;
+    let mut needs = Vec::new();
+    if let Some(al) = tmpl.attr_list() {
+        for attr in al.attrs() {
+            match attr.key_text().as_deref() {
+                Some("image") => image = attr.value_text().map(|s| s.to_string()),
+                Some("dependencies") => {
+                    if let Some(val) = attr.value() {
+                        needs = refs_from_attr_value(&val);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    TemplateData {
+        steps,
+        image,
+        needs,
+    }
+}
+
+fn parse_job_attrs(job: &ast::Job) -> (Option<String>, Option<String>, Vec<JobRef>) {
+    let mut image = None;
+    let mut inherit = None;
+    let mut needs = Vec::new();
+    if let Some(al) = job.attr_list() {
+        for attr in al.attrs() {
+            match attr.key_text().as_deref() {
+                Some("image") => image = attr.value_text().map(|s| s.to_string()),
+                Some("inherit") => inherit = attr.value_text().map(|s| s.to_string()),
+                Some("dependencies") => {
+                    if let Some(val) = attr.value() {
+                        needs = refs_from_attr_value(&val);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    (image, inherit, needs)
+}
+
+fn refs_from_attr_value(val: &ast::AttrValue) -> Vec<JobRef> {
+    val.ref_list()
+        .map(|rl| {
+            rl.refs()
+                .filter_map(|r| {
+                    let text = r.text();
+                    let (s, j) = text.split_once('.')?;
+                    Some(JobRef {
+                        stage: s.to_string(),
+                        job: j.to_string(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn job_script(job: &ast::Job, template_steps: &[(String, String)]) -> Vec<String> {
+    if let Some(inline) = job.inline_body() {
+        inline
+            .shell_text()
+            .map(|s| vec![dedent(&s)])
+            .unwrap_or_default()
+    } else if let Some(steps_body) = job.steps_body() {
+        resolve_steps(&steps_body, template_steps)
+    } else {
+        Vec::new()
+    }
+}
+
 fn build_import_map(root: &Root, base: &Path) -> HashMap<String, PathBuf> {
     let mut map = HashMap::new();
     for ub in root.use_blocks() {
@@ -295,7 +302,7 @@ fn build_import_map(root: &Root, base: &Path) -> HashMap<String, PathBuf> {
     map
 }
 
-fn load_cross_file_template(path: &Path, template_name: &str) -> anyhow::Result<TemplateSteps> {
+fn load_cross_file_template(path: &Path, template_name: &str) -> anyhow::Result<TemplateData> {
     let source = std::fs::read_to_string(path)
         .map_err(|e| anyhow::anyhow!("cannot read {}: {e}", path.display()))?;
     let result = parse(&source);
@@ -305,9 +312,7 @@ fn load_cross_file_template(path: &Path, template_name: &str) -> anyhow::Result<
         if let Some(body) = stage.body() {
             for tmpl in body.templates() {
                 if tmpl.name().as_deref() == Some(template_name) {
-                    return Ok(tmpl
-                        .body()
-                        .map_or_else(Vec::new, |b| collect_template_steps(&b)));
+                    return Ok(template_data_from_ast(&tmpl));
                 }
             }
         }
@@ -318,7 +323,7 @@ fn load_cross_file_template(path: &Path, template_name: &str) -> anyhow::Result<
     )
 }
 
-fn collect_template_steps(body: &JobBodySteps) -> TemplateSteps {
+fn collect_template_steps(body: &JobBodySteps) -> Vec<(String, String)> {
     body.steps()
         .filter_map(|s| {
             let name = s.name()?.to_string();
@@ -328,7 +333,7 @@ fn collect_template_steps(body: &JobBodySteps) -> TemplateSteps {
         .collect()
 }
 
-fn resolve_steps(body: &JobBodySteps, template_steps: &TemplateSteps) -> Vec<String> {
+fn resolve_steps(body: &JobBodySteps, template_steps: &[(String, String)]) -> Vec<String> {
     // Names of all steps explicitly listed in this job body (both full steps
     // and bare references).  These are skipped when `steps` is expanded so the
     // same step does not appear twice.

@@ -149,6 +149,9 @@ impl Printer {
     fn print_template(&mut self, tmpl: &TemplateDef) {
         self.push_str("template ");
         self.push_str(tmpl.name().as_deref().unwrap_or(""));
+        if let Some(attrs) = tmpl.attr_list() {
+            self.print_attr_list(&attrs);
+        }
         if let Some(body) = tmpl.body() {
             self.push(' ');
             self.print_job_body_steps(&body);

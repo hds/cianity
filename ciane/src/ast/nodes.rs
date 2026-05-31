@@ -56,6 +56,7 @@ impl HasName for Step {}
 
 impl HasAttrList for Stage {}
 impl HasAttrList for Job {}
+impl HasAttrList for TemplateDef {}
 impl HasAttrList for WorkflowImport {}
 
 // ─── Root ─────────────────────────────────────────────────────────────────────

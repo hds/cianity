@@ -185,10 +185,11 @@ fn template_def(p: &mut Parser<'_>) {
     p.start_node(SyntaxKind::TemplateDef);
     p.bump(); // `template`
     name(p);
+    if p.at(SyntaxKind::LParen) {
+        attr_list_body(p);
+    }
     if p.at(SyntaxKind::LBracket) {
         job_body_steps(p);
-    } else {
-        p.error("expected `[` for template body");
     }
     p.finish_node();
 }

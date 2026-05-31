@@ -21,6 +21,7 @@
 //! | `job_dependencies` | `needs:` section; image; unquoted `--`/`-D` dashes in script |
 //! | `name_conflict` | `stage.job` qualified names when the same job name appears in multiple stages; qualified names in `needs:` |
 //! | `cross_file_inherit` | `steps` expansion and step override from a template defined in another file |
+//! | `template_attrs_inherit` | template `image` attr propagates to inheriting jobs; job attr overrides template |
 
 use std::path::{Path, PathBuf};
 
@@ -85,6 +86,11 @@ fn build_name_conflict() {
 #[test]
 fn build_cross_file_inherit() {
     assert_gitlab_snapshot("cross_file_inherit");
+}
+
+#[test]
+fn build_template_attrs_inherit() {
+    assert_gitlab_snapshot("template_attrs_inherit");
 }
 
 // ── error cases ───────────────────────────────────────────────────────────────

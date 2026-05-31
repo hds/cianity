@@ -1,0 +1,16 @@
+stages:
+  - build
+
+unit:
+  stage: build
+  image: "rust:latest"
+  script:
+    - cargo build
+    - cargo test
+
+integration:
+  stage: build
+  image: "rust:nightly"
+  script:
+    - cargo build
+    - cargo test

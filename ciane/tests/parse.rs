@@ -124,6 +124,24 @@ stage test {
 }
 
 #[test]
+fn template_attrs_and_body() {
+    // A template may have both attributes and a body.
+    assert_no_errors(
+        r"
+stage test {
+    template base ( image = rust:latest ) [
+        step run { cargo test }
+    ]
+
+    job unit ( inherit = base ) [
+        steps
+    ]
+}
+",
+    );
+}
+
+#[test]
 fn kw_steps() {
     // `steps` inherits all template steps into a job.
     assert_no_errors(
@@ -423,8 +441,24 @@ stage build {
 }
 
 #[test]
-fn error_template_must_use_bracket_body() {
-    // `template` bodies use `[…]`, not `{…}`.
+fn template_attrs_only() {
+    // A template may have attributes but no body.
+    assert_no_errors(
+        r"
+stage build {
+    template base ( image = rust:latest )
+
+    job compile ( inherit = base ) { cargo build }
+}
+",
+    );
+}
+
+#[test]
+fn error_template_brace_body_not_valid() {
+    // `template` bodies use `[…]`, not `{…}`.  A `{` is not consumed by
+    // template_def (which makes body optional) and surfaces as an unexpected
+    // token in the enclosing stage_body.
     assert_has_error(
         r"
 stage build {
@@ -433,7 +467,7 @@ stage build {
     }
 }
 ",
-        "expected `[` for template body",
+        "expected `job` or `template`",
     );
 }
 
