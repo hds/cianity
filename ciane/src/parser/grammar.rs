@@ -17,6 +17,7 @@ pub(super) fn root(p: &mut Parser<'_>) {
     while !p.at(SyntaxKind::Eof) {
         match p.current() {
             SyntaxKind::KwStage => stage(p),
+            SyntaxKind::KwTemplate => template_def(p),
             SyntaxKind::KwDefaults => {
                 p.start_node(SyntaxKind::AttrList);
                 p.bump(); // `defaults`
@@ -25,7 +26,7 @@ pub(super) fn root(p: &mut Parser<'_>) {
                 }
                 p.finish_node();
             }
-            _ => p.error_bump("expected `stage` or end of file"),
+            _ => p.error_bump("expected `stage`, `template`, or end of file"),
         }
     }
 

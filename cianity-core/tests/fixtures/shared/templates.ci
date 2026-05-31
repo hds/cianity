@@ -1,6 +1,11 @@
-stage test {
-    template base [
+template base [
+    step setup { rustup update }
+    step run { cargo test }
+]
+
+stage extra {
+    template integration [
         step setup { rustup update }
-        step run { cargo test }
+        step run { cargo test --test '*' }
     ]
 }

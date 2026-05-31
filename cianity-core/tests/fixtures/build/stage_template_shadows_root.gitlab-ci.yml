@@ -1,0 +1,7 @@
+stages:
+  - test
+
+unit:
+  stage: test
+  script:
+    - echo stage

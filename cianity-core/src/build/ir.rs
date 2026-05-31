@@ -83,6 +83,7 @@ struct TemplateData {
 /// contains only concrete jobs.
 #[must_use]
 pub fn lower(root: &Root) -> Workflow {
+    let root_templates = collect_root_templates(root);
     let mut stages = Vec::new();
 
     for stage in root.stages() {
@@ -91,17 +92,18 @@ pub fn lower(root: &Root) -> Workflow {
             continue;
         };
 
-        let templates = collect_local_templates(&body);
+        let stage_templates = collect_local_templates(&body);
         let mut jobs = Vec::new();
 
         for job in body.jobs() {
             let job_name = job.name().map_or_else(String::new, |s| s.to_string());
             let (mut image, inherit, mut needs) = parse_job_attrs(&job);
 
+            // Stage-local templates shadow root-level templates.
             let template_data = inherit
                 .as_deref()
                 .filter(|t| !t.contains('/'))
-                .and_then(|t| templates.get(t));
+                .and_then(|t| stage_templates.get(t).or_else(|| root_templates.get(t)));
 
             if image.is_none() {
                 image = template_data.and_then(|td| td.image.clone());
@@ -140,6 +142,10 @@ pub fn lower(root: &Root) -> Workflow {
 ///
 /// Paths in `use {}` blocks are resolved relative to `path`'s parent directory.
 ///
+/// Cross-file reference formats:
+/// - `ns/tmpl` — top-level template in the imported file
+/// - `ns/stage.tmpl` — template inside `stage` in the imported file
+///
 /// # Errors
 ///
 /// Returns `Err` if a referenced import file cannot be read, or if the named
@@ -147,6 +153,7 @@ pub fn lower(root: &Root) -> Workflow {
 pub fn lower_with_path(root: &Root, path: &Path) -> anyhow::Result<Workflow> {
     let base = path.parent().unwrap_or(Path::new("."));
     let import_map = build_import_map(root, base);
+    let root_templates = collect_root_templates(root);
     let mut stages = Vec::new();
 
     for stage in root.stages() {
@@ -155,7 +162,7 @@ pub fn lower_with_path(root: &Root, path: &Path) -> anyhow::Result<Workflow> {
             continue;
         };
 
-        let templates = collect_local_templates(&body);
+        let stage_templates = collect_local_templates(&body);
         let mut jobs = Vec::new();
 
         for job in body.jobs() {
@@ -163,13 +170,23 @@ pub fn lower_with_path(root: &Root, path: &Path) -> anyhow::Result<Workflow> {
             let (mut image, inherit, mut needs) = parse_job_attrs(&job);
 
             let template_data: TemplateData = if let Some(name) = inherit.as_deref() {
-                if let Some((import_name, template_name)) = name.split_once('/') {
+                if let Some((import_name, template_ref)) = name.split_once('/') {
                     let file_path = import_map
                         .get(import_name)
                         .ok_or_else(|| anyhow::anyhow!("unknown import `{import_name}`"))?;
-                    load_cross_file_template(file_path, template_name)?
+                    // `ns/tmpl` → top-level; `ns/stage.tmpl` → stage-local
+                    if let Some((sname, tname)) = template_ref.split_once('.') {
+                        load_cross_file_stage_template(file_path, sname, tname)?
+                    } else {
+                        load_cross_file_top_level_template(file_path, template_ref)?
+                    }
                 } else {
-                    templates.get(name).cloned().unwrap_or_default()
+                    // Stage-local shadows root-level.
+                    stage_templates
+                        .get(name)
+                        .or_else(|| root_templates.get(name))
+                        .cloned()
+                        .unwrap_or_default()
                 }
             } else {
                 TemplateData::default()
@@ -203,6 +220,15 @@ pub fn lower_with_path(root: &Root, path: &Path) -> anyhow::Result<Workflow> {
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
+
+fn collect_root_templates(root: &Root) -> HashMap<String, TemplateData> {
+    root.templates()
+        .filter_map(|t| {
+            let name = t.name()?.to_string();
+            Some((name, template_data_from_ast(&t)))
+        })
+        .collect()
+}
 
 fn collect_local_templates(body: &ast::StageBody) -> HashMap<String, TemplateData> {
     body.templates()
@@ -302,13 +328,40 @@ fn build_import_map(root: &Root, base: &Path) -> HashMap<String, PathBuf> {
     map
 }
 
-fn load_cross_file_template(path: &Path, template_name: &str) -> anyhow::Result<TemplateData> {
+fn load_cross_file_top_level_template(
+    path: &Path,
+    template_name: &str,
+) -> anyhow::Result<TemplateData> {
+    let source = std::fs::read_to_string(path)
+        .map_err(|e| anyhow::anyhow!("cannot read {}: {e}", path.display()))?;
+    let result = parse(&source);
+    let root =
+        Root::cast(result.syntax()).ok_or_else(|| anyhow::anyhow!("internal: no Root node"))?;
+    for tmpl in root.templates() {
+        if tmpl.name().as_deref() == Some(template_name) {
+            return Ok(template_data_from_ast(&tmpl));
+        }
+    }
+    anyhow::bail!(
+        "top-level template `{template_name}` not found in `{}`",
+        path.display()
+    )
+}
+
+fn load_cross_file_stage_template(
+    path: &Path,
+    stage_name: &str,
+    template_name: &str,
+) -> anyhow::Result<TemplateData> {
     let source = std::fs::read_to_string(path)
         .map_err(|e| anyhow::anyhow!("cannot read {}: {e}", path.display()))?;
     let result = parse(&source);
     let root =
         Root::cast(result.syntax()).ok_or_else(|| anyhow::anyhow!("internal: no Root node"))?;
     for stage in root.stages() {
+        if stage.name().as_deref() != Some(stage_name) {
+            continue;
+        }
         if let Some(body) = stage.body() {
             for tmpl in body.templates() {
                 if tmpl.name().as_deref() == Some(template_name) {
@@ -318,7 +371,7 @@ fn load_cross_file_template(path: &Path, template_name: &str) -> anyhow::Result<
         }
     }
     anyhow::bail!(
-        "template `{template_name}` not found in `{}`",
+        "template `{template_name}` not found in stage `{stage_name}` of `{}`",
         path.display()
     )
 }

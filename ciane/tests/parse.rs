@@ -335,12 +335,80 @@ stage test (
     );
 }
 
+// ── valid: top-level templates ────────────────────────────────────────────────
+
+#[test]
+fn top_level_template_no_body() {
+    assert_no_errors(
+        r"
+template base ( image = rust:latest )
+
+stage build {
+    job compile ( inherit = base ) { cargo build }
+}
+",
+    );
+}
+
+#[test]
+fn top_level_template_with_body() {
+    assert_no_errors(
+        r"
+template common [
+    step setup { echo setup }
+    step run { cargo test }
+]
+
+stage test {
+    job unit ( inherit = common ) [
+        steps,
+    ]
+}
+",
+    );
+}
+
+#[test]
+fn top_level_template_before_and_after_stage() {
+    assert_no_errors(
+        r"
+template pre [
+    step init { echo init }
+]
+
+stage build {
+    job compile { cargo build }
+}
+
+template post [
+    step cleanup { echo done }
+]
+
+stage test {
+    job run ( inherit = pre ) [ steps, ]
+}
+",
+    );
+}
+
+#[test]
+fn top_level_template_standalone() {
+    // A template at the top level with no stages is syntactically valid.
+    assert_no_errors(
+        r"
+template base [
+    step run { cargo test }
+]
+",
+    );
+}
+
 // ── invalid: parse errors ─────────────────────────────────────────────────────
 
 #[test]
 fn error_unexpected_token_at_root() {
     // A bare identifier at the top level is not a valid item.
-    assert_has_error("foo", "expected `stage` or end of file");
+    assert_has_error("foo", "expected `stage`, `template`, or end of file");
 }
 
 #[test]

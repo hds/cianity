@@ -1,0 +1,8 @@
+stages:
+  - ci
+
+check:
+  stage: ci
+  script:
+    - rustup update
+    - cargo test --test '*'

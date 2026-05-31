@@ -77,7 +77,7 @@ fn check_cross_file_inherits(
                 let Some(value) = attr.value_text() else {
                     continue;
                 };
-                let Some((import_name, template_name)) = value.split_once('/') else {
+                let Some((import_name, template_ref)) = value.split_once('/') else {
                     continue;
                 };
                 let span = {
@@ -86,7 +86,14 @@ fn check_cross_file_inherits(
                 };
                 if let Some(file_path) = imports.get(import_name) {
                     if file_path.exists() {
-                        match template_exists_in_file(file_path, template_name) {
+                        // `ns/tmpl` → top-level template; `ns/stage.tmpl` → stage-local
+                        let result =
+                            if let Some((stage_name, tmpl_name)) = template_ref.split_once('.') {
+                                template_exists_in_stage(file_path, stage_name, tmpl_name)
+                            } else {
+                                template_exists_at_top_level(file_path, template_ref)
+                            };
+                        match result {
                             Ok(true) => {}
                             Ok(false) => {
                                 *has_error = true;
@@ -96,7 +103,7 @@ fn check_cross_file_inherits(
                                     &Diagnostic {
                                         severity: Severity::Error,
                                         message: format!(
-                                            "template `{template_name}` not found \
+                                            "template `{template_ref}` not found \
                                              in import `{import_name}`"
                                         ),
                                         span,
@@ -166,18 +173,39 @@ fn build_import_map(root: &Root, base: &Path) -> HashMap<String, PathBuf> {
     map
 }
 
-fn template_exists_in_file(path: &Path, template_name: &str) -> anyhow::Result<bool> {
+/// Check whether a top-level (outside any stage) template with `template_name`
+/// exists in `path`.
+fn template_exists_at_top_level(path: &Path, template_name: &str) -> anyhow::Result<bool> {
     let source =
         std::fs::read_to_string(path).map_err(|e| anyhow::anyhow!("cannot read file: {e}"))?;
     let result = parse(&source);
     let root =
         Root::cast(result.syntax()).ok_or_else(|| anyhow::anyhow!("internal: no Root node"))?;
-    Ok(root.stages().any(|s| {
-        s.body().is_some_and(|b| {
+    Ok(root
+        .templates()
+        .any(|t| t.name().as_deref() == Some(template_name)))
+}
+
+/// Check whether a template named `template_name` exists inside stage
+/// `stage_name` in `path`.
+fn template_exists_in_stage(
+    path: &Path,
+    stage_name: &str,
+    template_name: &str,
+) -> anyhow::Result<bool> {
+    let source =
+        std::fs::read_to_string(path).map_err(|e| anyhow::anyhow!("cannot read file: {e}"))?;
+    let result = parse(&source);
+    let root =
+        Root::cast(result.syntax()).ok_or_else(|| anyhow::anyhow!("internal: no Root node"))?;
+    Ok(root
+        .stages()
+        .find(|s| s.name().as_deref() == Some(stage_name))
+        .and_then(|s| s.body())
+        .is_some_and(|b| {
             b.templates()
                 .any(|t| t.name().as_deref() == Some(template_name))
-        })
-    }))
+        }))
 }
 
 fn print_diagnostic(filename: &str, source: &str, diag: &Diagnostic) {

@@ -36,20 +36,37 @@ impl Printer {
 
         let mut had_output = false;
 
-        for use_block in root.use_blocks() {
-            if had_output {
-                self.push_str("\n\n");
+        for child in root.syntax().children() {
+            match child.kind() {
+                SyntaxKind::UseBlock => {
+                    if let Some(use_block) = UseBlock::cast(child) {
+                        if had_output {
+                            self.push_str("\n\n");
+                        }
+                        self.print_use_block(&use_block);
+                        had_output = true;
+                    }
+                }
+                SyntaxKind::Stage => {
+                    if let Some(stage) = Stage::cast(child) {
+                        if had_output {
+                            self.push_str("\n\n");
+                        }
+                        self.print_stage(&stage);
+                        had_output = true;
+                    }
+                }
+                SyntaxKind::TemplateDef => {
+                    if let Some(tmpl) = TemplateDef::cast(child) {
+                        if had_output {
+                            self.push_str("\n\n");
+                        }
+                        self.print_template(&tmpl);
+                        had_output = true;
+                    }
+                }
+                _ => {}
             }
-            self.print_use_block(&use_block);
-            had_output = true;
-        }
-
-        for stage in root.stages() {
-            if had_output {
-                self.push_str("\n\n");
-            }
-            self.print_stage(&stage);
-            had_output = true;
         }
 
         self.push('\n');

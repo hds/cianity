@@ -155,6 +155,130 @@ stage test {
     );
 }
 
+#[test]
+fn valid_inherit_top_level_template() {
+    // A job may inherit from a top-level template without any warning.
+    assert_no_diagnostics(
+        r"
+template base [
+    step run { cargo test }
+]
+
+stage test {
+    job smoke ( inherit = base ) [
+        step run { cargo test -- smoke }
+    ]
+}
+",
+    );
+}
+
+#[test]
+fn valid_inherit_top_level_template_across_stages() {
+    // Top-level templates are visible to jobs in any stage.
+    assert_no_diagnostics(
+        r"
+template shared [
+    step build { cargo build }
+    step test { cargo test }
+]
+
+stage a {
+    job job_a ( inherit = shared ) [ steps, ]
+}
+
+stage b {
+    job job_b ( inherit = shared ) [ steps, ]
+}
+",
+    );
+}
+
+#[test]
+fn valid_stage_template_shadows_root_template() {
+    // A stage-local template with the same name as a root template is valid;
+    // neither a duplicate-name error nor an unknown-template warning is expected.
+    assert_no_diagnostics(
+        r"
+template base [
+    step run { echo root }
+]
+
+stage test {
+    template base [
+        step run { cargo test }
+    ]
+
+    job unit ( inherit = base ) [ steps, ]
+}
+",
+    );
+}
+
+#[test]
+fn valid_stage_template_shadows_root_no_warning_for_root_only() {
+    // When a name exists only at the root level (no stage-local template),
+    // `inherit` resolves it without a warning.
+    assert_no_diagnostics(
+        r"
+template shared [
+    step run { cargo test }
+]
+
+stage test {
+    job unit ( inherit = shared ) [
+        step run { cargo test -- unit }
+    ]
+}
+",
+    );
+}
+
+#[test]
+fn valid_shadowing_does_not_warn_when_both_exist() {
+    // When both a root template and a stage-local template share a name,
+    // the stage-local one wins and no warning is emitted.
+    assert_no_diagnostics(
+        r"
+template common [
+    step run { echo root }
+]
+
+stage a {
+    template common [
+        step run { echo stage_a }
+    ]
+    job job_a ( inherit = common ) [ steps, ]
+}
+
+stage b {
+    job job_b ( inherit = common ) [ steps, ]
+}
+",
+    );
+}
+
+#[test]
+fn error_duplicate_top_level_template_names() {
+    assert_has_diagnostic(
+        r"
+template base [
+    step run { cargo test }
+]
+
+template base [
+    step run { cargo build }
+]
+
+stage build {
+    job compile { cargo build }
+}
+",
+        Severity::Error,
+        "duplicate top-level template name",
+    );
+}
+
 // ── invalid: expected diagnostics ────────────────────────────────────────────
 
 #[test]
@@ -225,7 +349,8 @@ stage build {
 
 #[test]
 fn warning_inherit_references_unknown_template() {
-    // Inheriting from a name that isn't a template in this stage is a warning.
+    // Inheriting from a name that isn't a template in this stage or at the top
+    // level is a warning.
     assert_has_diagnostic(
         r"
 stage build {
@@ -235,7 +360,7 @@ stage build {
 }
 ",
         Severity::Warning,
-        "no template with that name is defined in this stage",
+        "no template with that name is defined in this stage or at the top level",
     );
 }
 

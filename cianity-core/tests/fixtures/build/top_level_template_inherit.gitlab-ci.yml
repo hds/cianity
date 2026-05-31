@@ -1,0 +1,8 @@
+stages:
+  - test
+
+unit:
+  stage: test
+  script:
+    - echo setup
+    - cargo test

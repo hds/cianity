@@ -1,0 +1,13 @@
+template base [
+    step run { echo root }
+]
+
+stage test {
+    template base [
+        step run { echo stage }
+    ]
+
+    job unit ( inherit = base ) [
+        steps,
+    ]
+}

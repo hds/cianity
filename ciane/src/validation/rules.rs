@@ -10,8 +10,10 @@ use crate::{
 /// Collect all semantic diagnostics from a parsed `Root` node.
 pub(super) fn check_root(root: &Root, diagnostics: &mut Vec<Diagnostic>) {
     check_duplicate_stage_names(root, diagnostics);
+    check_duplicate_root_template_names(root, diagnostics);
+    let root_template_names: HashSet<SmolStr> = root.templates().filter_map(|t| t.name()).collect();
     for stage in root.stages() {
-        check_stage(&stage, diagnostics);
+        check_stage(&stage, &root_template_names, diagnostics);
     }
     for use_block in root.use_blocks() {
         for import in use_block.imports() {
@@ -35,12 +37,39 @@ fn check_duplicate_stage_names(root: &Root, diagnostics: &mut Vec<Diagnostic>) {
     }
 }
 
-fn check_stage(stage: &Stage, diagnostics: &mut Vec<Diagnostic>) {
+fn check_duplicate_root_template_names(root: &Root, diagnostics: &mut Vec<Diagnostic>) {
+    let mut seen: HashSet<SmolStr> = HashSet::new();
+    for tmpl in root.templates() {
+        if let Some(name) = tmpl.name()
+            && !seen.insert(name.clone())
+        {
+            diagnostics.push(Diagnostic {
+                severity: Severity::Error,
+                message: format!("duplicate top-level template name `{name}`"),
+                span: span_of(tmpl.syntax()),
+            });
+        }
+    }
+}
+
+fn check_stage(
+    stage: &Stage,
+    root_templates: &HashSet<SmolStr>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
     let Some(body) = stage.body() else {
         return;
     };
 
-    let template_names: HashSet<SmolStr> = body.templates().filter_map(|t| t.name()).collect();
+    let stage_template_names: HashSet<SmolStr> =
+        body.templates().filter_map(|t| t.name()).collect();
+
+    // Both stage-local and root-level templates are in scope for `inherit`.
+    let all_template_names: HashSet<SmolStr> = stage_template_names
+        .iter()
+        .chain(root_templates.iter())
+        .cloned()
+        .collect();
 
     let mut seen: HashSet<SmolStr> = HashSet::new();
     for job in body.jobs() {
@@ -53,7 +82,7 @@ fn check_stage(stage: &Stage, diagnostics: &mut Vec<Diagnostic>) {
                 span: span_of(job.syntax()),
             });
         }
-        check_job_steps(&job, &template_names, diagnostics);
+        check_job_steps(&job, &all_template_names, diagnostics);
     }
     for tmpl in body.templates() {
         if let Some(name) = tmpl.name()
@@ -95,7 +124,7 @@ fn check_job_steps(
                     severity: Severity::Warning,
                     message: format!(
                         "job inherits from `{value}`, but no template with that name \
-                         is defined in this stage"
+                         is defined in this stage or at the top level"
                     ),
                     span: span_of(attr.syntax()),
                 });

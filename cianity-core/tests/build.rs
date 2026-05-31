@@ -22,6 +22,8 @@
 //! | `name_conflict` | `stage.job` qualified names when the same job name appears in multiple stages; qualified names in `needs:` |
 //! | `cross_file_inherit` | `steps` expansion and step override from a template defined in another file |
 //! | `template_attrs_inherit` | template `image` attr propagates to inheriting jobs; job attr overrides template |
+//! | `top_level_template_inherit` | job inherits from a top-level template defined outside any stage |
+//! | `cross_file_stage_template` | `ns/stage.tmpl` syntax resolves a template inside a named stage in another file |
 
 use std::path::{Path, PathBuf};
 
@@ -91,6 +93,21 @@ fn build_cross_file_inherit() {
 #[test]
 fn build_template_attrs_inherit() {
     assert_gitlab_snapshot("template_attrs_inherit");
+}
+
+#[test]
+fn build_top_level_template_inherit() {
+    assert_gitlab_snapshot("top_level_template_inherit");
+}
+
+#[test]
+fn build_stage_template_shadows_root() {
+    assert_gitlab_snapshot("stage_template_shadows_root");
+}
+
+#[test]
+fn build_cross_file_stage_template() {
+    assert_gitlab_snapshot("cross_file_stage_template");
 }
 
 // ── error cases ───────────────────────────────────────────────────────────────

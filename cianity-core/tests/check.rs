@@ -54,6 +54,16 @@ fn valid_cross_file_inherit() {
     assert_check_passes("cross_file_inherit");
 }
 
+#[test]
+fn valid_top_level_template() {
+    assert_check_passes("top_level_template");
+}
+
+#[test]
+fn valid_cross_file_stage_template() {
+    assert_check_passes("cross_file_stage_template");
+}
+
 // ── invalid fixtures ──────────────────────────────────────────────────────────
 
 #[test]
@@ -89,6 +99,11 @@ fn invalid_inherit_use_file_missing() {
 #[test]
 fn invalid_inherit_template_not_in_file() {
     assert_check_fails("inherit_template_not_in_file");
+}
+
+#[test]
+fn invalid_inherit_stage_template_not_found() {
+    assert_check_fails("inherit_stage_template_not_found");
 }
 
 // ── workspace check ───────────────────────────────────────────────────────────

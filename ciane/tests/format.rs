@@ -111,6 +111,54 @@ fn ref_list_attr_value() {
     check_idempotent(src);
 }
 
+// ── top-level templates ───────────────────────────────────────────────────────
+
+#[test]
+fn top_level_template_only() {
+    let src = "template base [ step run { cargo test } ]";
+    let out = format(src);
+    assert!(
+        out.starts_with("template base ["),
+        "should start with template"
+    );
+    assert!(out.contains("step run { cargo test }"));
+    check_idempotent(src);
+}
+
+#[test]
+fn top_level_template_then_stage() {
+    let src = "template base [ step run { cargo test } ] stage test { job unit { cargo test } }";
+    let out = format(src);
+    assert!(out.starts_with("template base ["));
+    assert!(
+        out.contains("\n\nstage test"),
+        "blank line between template and stage"
+    );
+    check_idempotent(src);
+}
+
+#[test]
+fn stage_then_top_level_template() {
+    let src = "stage build { job compile { cargo build } } template post [ step done { echo ok } ]";
+    let out = format(src);
+    assert!(out.starts_with("stage build {"));
+    assert!(
+        out.contains("\n\ntemplate post ["),
+        "blank line between stage and template"
+    );
+    check_idempotent(src);
+}
+
+#[test]
+fn use_block_then_top_level_template_then_stage() {
+    let src = "use { workflow(location=./a.ci,name=a) } template t [ step s { cmd } ] stage b { job j { echo } }";
+    let out = format(src);
+    assert!(out.starts_with("use {"));
+    assert!(out.contains("\n\ntemplate t ["));
+    assert!(out.contains("\n\nstage b {"));
+    check_idempotent(src);
+}
+
 // ── error cases ───────────────────────────────────────────────────────────────
 
 #[test]

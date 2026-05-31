@@ -71,6 +71,11 @@ impl Root {
     pub fn stages(&self) -> impl Iterator<Item = Stage> + '_ {
         self.0.children().filter_map(Stage::cast)
     }
+
+    /// All top-level `TemplateDef` children (outside any stage).
+    pub fn templates(&self) -> impl Iterator<Item = TemplateDef> + '_ {
+        self.0.children().filter_map(TemplateDef::cast)
+    }
 }
 
 // ─── UseBlock ─────────────────────────────────────────────────────────────────
