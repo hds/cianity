@@ -9,6 +9,9 @@ mod rename;
 mod symbols;
 mod util;
 
+#[cfg(test)]
+mod tests;
+
 use tower_lsp_server::{LspService, Server};
 
 use backend::Backend;
