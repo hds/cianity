@@ -1,7 +1,9 @@
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 use ciane::{
     ast::{self, AstNode, HasAttrList, HasName, JobBodySteps, Root},
+    parse,
     syntax::SyntaxKind,
 };
 
@@ -167,6 +169,153 @@ pub fn lower(root: &Root) -> Workflow {
     }
 
     Workflow { stages }
+}
+
+/// Lower a parsed `Root` into a `Workflow`, resolving cross-file template
+/// references via the `use {}` import map.
+///
+/// Paths in `use {}` blocks are resolved relative to `path`'s parent directory.
+///
+/// # Errors
+///
+/// Returns `Err` if a referenced import file cannot be read, or if the named
+/// template is not found in that file.
+pub fn lower_with_path(root: &Root, path: &Path) -> anyhow::Result<Workflow> {
+    let base = path.parent().unwrap_or(Path::new("."));
+    let import_map = build_import_map(root, base);
+
+    let mut stages = Vec::new();
+
+    for stage in root.stages() {
+        let stage_name = stage.name().map_or_else(String::new, |s| s.to_string());
+
+        let Some(body) = stage.body() else {
+            continue;
+        };
+
+        let templates: HashMap<String, TemplateSteps> = body
+            .templates()
+            .filter_map(|t| {
+                let name = t.name()?.to_string();
+                let steps = t
+                    .body()
+                    .map_or_else(Vec::new, |b| collect_template_steps(&b));
+                Some((name, steps))
+            })
+            .collect();
+
+        let mut jobs = Vec::new();
+        for job in body.jobs() {
+            let job_name = job.name().map_or_else(String::new, |s| s.to_string());
+
+            let mut image: Option<String> = None;
+            let mut inherit: Option<String> = None;
+            let mut needs: Vec<JobRef> = Vec::new();
+
+            if let Some(attr_list) = job.attr_list() {
+                for attr in attr_list.attrs() {
+                    match attr.key_text().as_deref() {
+                        Some("image") => {
+                            image = attr.value_text().map(|s| s.to_string());
+                        }
+                        Some("inherit") => {
+                            inherit = attr.value_text().map(|s| s.to_string());
+                        }
+                        Some("dependencies") => {
+                            if let Some(val) = attr.value()
+                                && let Some(ref_list) = val.ref_list()
+                            {
+                                for r in ref_list.refs() {
+                                    let text = r.text();
+                                    if let Some((s, j)) = text.split_once('.') {
+                                        needs.push(JobRef {
+                                            stage: s.to_string(),
+                                            job: j.to_string(),
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+
+            let template_steps: TemplateSteps = if let Some(name) = inherit.as_deref() {
+                if let Some((import_name, template_name)) = name.split_once('/') {
+                    let file_path = import_map
+                        .get(import_name)
+                        .ok_or_else(|| anyhow::anyhow!("unknown import `{import_name}`"))?;
+                    load_cross_file_template(file_path, template_name)?
+                } else {
+                    templates.get(name).cloned().unwrap_or_default()
+                }
+            } else {
+                Vec::new()
+            };
+
+            let script = if let Some(inline) = job.inline_body() {
+                inline
+                    .shell_text()
+                    .map(|s| vec![dedent(&s)])
+                    .unwrap_or_default()
+            } else if let Some(steps_body) = job.steps_body() {
+                resolve_steps(&steps_body, &template_steps)
+            } else {
+                Vec::new()
+            };
+
+            jobs.push(Job {
+                name: job_name,
+                stage: stage_name.clone(),
+                image,
+                script,
+                needs,
+            });
+        }
+
+        stages.push(Stage {
+            name: stage_name,
+            jobs,
+        });
+    }
+
+    Ok(Workflow { stages })
+}
+
+fn build_import_map(root: &Root, base: &Path) -> HashMap<String, PathBuf> {
+    let mut map = HashMap::new();
+    for ub in root.use_blocks() {
+        for imp in ub.imports() {
+            if let Some((name, loc)) = imp.name().zip(imp.location()) {
+                map.insert(name.to_string(), base.join(loc.as_str()));
+            }
+        }
+    }
+    map
+}
+
+fn load_cross_file_template(path: &Path, template_name: &str) -> anyhow::Result<TemplateSteps> {
+    let source = std::fs::read_to_string(path)
+        .map_err(|e| anyhow::anyhow!("cannot read {}: {e}", path.display()))?;
+    let result = parse(&source);
+    let root =
+        Root::cast(result.syntax()).ok_or_else(|| anyhow::anyhow!("internal: no Root node"))?;
+    for stage in root.stages() {
+        if let Some(body) = stage.body() {
+            for tmpl in body.templates() {
+                if tmpl.name().as_deref() == Some(template_name) {
+                    return Ok(tmpl
+                        .body()
+                        .map_or_else(Vec::new, |b| collect_template_steps(&b)));
+                }
+            }
+        }
+    }
+    anyhow::bail!(
+        "template `{template_name}` not found in `{}`",
+        path.display()
+    )
 }
 
 fn collect_template_steps(body: &JobBodySteps) -> TemplateSteps {

@@ -26,19 +26,35 @@ pub(super) fn render_source(source: &str) -> anyhow::Result<String> {
     Ok(render(&ir::lower(&root)))
 }
 
+/// Read a `ciane` source file and render it as a GitLab CI YAML string,
+/// resolving any cross-file template references.
+///
+/// # Errors
+///
+/// Returns `Err` if the file cannot be read, has parse errors, or a
+/// cross-file template reference cannot be resolved.
+pub(super) fn render_path(path: &Path) -> anyhow::Result<String> {
+    let source =
+        std::fs::read_to_string(path).map_err(|e| anyhow::anyhow!("cannot read file: {e}"))?;
+    let result = parse(&source);
+    if !result.errors().is_empty() {
+        anyhow::bail!("file has parse errors");
+    }
+    let root = Root::cast(result.syntax())
+        .ok_or_else(|| anyhow::anyhow!("internal error: parse produced no Root node"))?;
+    Ok(render(&ir::lower_with_path(&root, path)?))
+}
+
 /// Read a `ciane` source file and write an equivalent `.gitlab-ci.yml` to the
 /// same directory.
 ///
 /// # Errors
 ///
-/// Returns `Err` if the file cannot be read, has parse errors, or the output
-/// cannot be written.
+/// Returns `Err` if the file cannot be read, has parse errors, a cross-file
+/// template reference cannot be resolved, or the output cannot be written.
 pub(super) fn run(path: &Path, output: Option<&Path>) -> anyhow::Result<PathBuf> {
-    let source =
-        std::fs::read_to_string(path).map_err(|e| anyhow::anyhow!("cannot read file: {e}"))?;
-
-    let yaml = render_source(&source)
-        .map_err(|e| anyhow::anyhow!("cannot build {}: {e}", path.display()))?;
+    let yaml =
+        render_path(path).map_err(|e| anyhow::anyhow!("cannot build {}: {e}", path.display()))?;
 
     let out_path = output.map_or_else(|| path.with_file_name(".gitlab-ci.yml"), Path::to_path_buf);
     std::fs::write(&out_path, yaml)
