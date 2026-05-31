@@ -1,0 +1,54 @@
+stages:
+  - build
+  - test
+  - cianity_check
+
+build_debug:
+  stage: build
+  image: "rust:1.96-slim-trixie"
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_MERGE_REQUEST_IID
+  script:
+    - cargo build --workspace
+
+test:
+  stage: test
+  image: "rust:1.96-trixie"
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_MERGE_REQUEST_IID
+  script:
+    - curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin
+    - cargo nextest run --workspace
+
+fmt:
+  stage: test
+  image: "rust:1.96-slim-trixie"
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_MERGE_REQUEST_IID
+  script:
+    - rustup component add rustfmt
+    - cargo fmt --check
+
+clippy:
+  stage: test
+  image: "rust:1.96-slim-trixie"
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_MERGE_REQUEST_IID
+  script:
+    - rustup component add clippy
+    - cargo clippy
+
+check:
+  stage: cianity_check
+  image: "rust:1.96-slim-trixie"
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_MERGE_REQUEST_IID
+  script:
+    - cargo build --release --bin cianity
+    - cargo run --release --bin cianity -- check
+    - cargo run --release --bin cianity -- format --check
