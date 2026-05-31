@@ -1,0 +1,5 @@
+stage build {
+    template compile [
+        step run { cargo build --release }
+    ]
+}

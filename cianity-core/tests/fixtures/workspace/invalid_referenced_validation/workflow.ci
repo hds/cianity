@@ -1,0 +1,10 @@
+use {
+    workflow (
+        location = ./bad.ci,
+        name = bad,
+    )
+}
+
+stage deploy {
+    job run { ./deploy.sh }
+}

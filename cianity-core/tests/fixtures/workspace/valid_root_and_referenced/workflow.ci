@@ -1,0 +1,12 @@
+use {
+    workflow (
+        location = ./shared.ci,
+        name = shared,
+    )
+}
+
+stage build {
+    job compile ( inherit = shared/compile ) [
+        steps,
+    ]
+}

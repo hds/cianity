@@ -1,0 +1,10 @@
+use {
+    workflow (
+        location = ./broken.ci,
+        name = broken,
+    )
+}
+
+stage deploy {
+    job run { ./deploy.sh }
+}

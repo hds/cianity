@@ -7,6 +7,7 @@ use ciane::{
     parser::Parse,
     validation::validate,
 };
+use cianity_core::workspace;
 use tokio::sync::Mutex;
 use tower_lsp_server::{
     Client, LanguageServer,
@@ -28,7 +29,7 @@ use super::{
 
 pub struct Backend {
     client: Client,
-    documents: Arc<Mutex<HashMap<String, (Parse, String)>>>,
+    documents: Arc<Mutex<HashMap<Uri, (Parse, String)>>>,
 }
 
 impl Backend {
@@ -45,7 +46,7 @@ impl Backend {
         let lsp_diagnostics = collect_diagnostics(&parsed, &text);
         {
             let mut docs = self.documents.lock().await;
-            docs.insert(uri.to_string(), (parsed, text));
+            docs.insert(uri.clone(), (parsed, text));
         }
         self.client
             .publish_diagnostics(uri, lsp_diagnostics, None)
@@ -82,14 +83,14 @@ impl LanguageServer for Backend {
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         let mut docs = self.documents.lock().await;
-        docs.remove(&params.text_document.uri.to_string());
+        docs.remove(&params.text_document.uri);
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
         let docs = self.documents.lock().await;
-        let Some((parse, source)) = docs.get(&uri.to_string()) else {
+        let Some((parse, source)) = docs.get(&uri) else {
             return Ok(None);
         };
         let offset = util::position_to_offset(source, position);
@@ -103,12 +104,15 @@ impl LanguageServer for Backend {
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
         let docs = self.documents.lock().await;
-        let Some((parse, source)) = docs.get(&uri.to_string()) else {
+        let Some((parse, source)) = docs.get(&uri) else {
             return Ok(None);
         };
         let offset = util::position_to_offset(source, position);
-        let range = definition::resolve(parse, source, offset);
-        Ok(range.map(|r| GotoDefinitionResponse::Scalar(Location { uri, range: r })))
+        let Some(cow) = uri.to_file_path() else {
+            return Ok(None);
+        };
+        let location = definition::resolve(parse, source, offset, &cow, &uri);
+        Ok(location.map(GotoDefinitionResponse::Scalar))
     }
 
     async fn document_symbol(
@@ -117,7 +121,7 @@ impl LanguageServer for Backend {
     ) -> Result<Option<DocumentSymbolResponse>> {
         let uri = params.text_document.uri;
         let docs = self.documents.lock().await;
-        let Some((parse, source)) = docs.get(&uri.to_string()) else {
+        let Some((parse, source)) = docs.get(&uri) else {
             return Ok(None);
         };
         Ok(Some(DocumentSymbolResponse::Nested(symbols::collect(
@@ -129,7 +133,7 @@ impl LanguageServer for Backend {
         let uri = params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
         let docs = self.documents.lock().await;
-        let Some((parse, source)) = docs.get(&uri.to_string()) else {
+        let Some((parse, source)) = docs.get(&uri) else {
             return Ok(None);
         };
         let offset = util::position_to_offset(source, position);
@@ -143,7 +147,7 @@ impl LanguageServer for Backend {
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
         let uri = params.text_document.uri;
         let docs = self.documents.lock().await;
-        let Some((parse, source)) = docs.get(&uri.to_string()) else {
+        let Some((parse, source)) = docs.get(&uri) else {
             return Ok(None);
         };
         Ok(format::edits(parse, source))
@@ -154,21 +158,67 @@ impl LanguageServer for Backend {
         let position = params.text_document_position.position;
         let include_declaration = params.context.include_declaration;
         let docs = self.documents.lock().await;
-        let Some((parse, source)) = docs.get(&uri.to_string()) else {
+        let Some((parse, source)) = docs.get(&uri) else {
             return Ok(None);
         };
         let offset = util::position_to_offset(source, position);
-        Ok(
-            references::find(parse, source, offset, include_declaration).map(|ranges| {
-                ranges
-                    .into_iter()
-                    .map(|range| Location {
-                        uri: uri.clone(),
-                        range,
-                    })
-                    .collect()
-            }),
-        )
+        let Some(cow) = uri.to_file_path() else {
+            return Ok(None);
+        };
+        let mut locations =
+            references::find(parse, source, offset, include_declaration, &cow, &uri)
+                .unwrap_or_default();
+
+        // When cursor is on a template definition, search for all
+        // `inherit = import_name/template_name` usages in the workspace.
+        if let Some(tmpl_name) = references::template_def_at(parse, offset) {
+            // Search already-open documents first.
+            for (doc_uri, (doc_parse, doc_source)) in &*docs {
+                if doc_uri == &uri {
+                    continue;
+                }
+                let Some(doc_path) = doc_uri.to_file_path() else {
+                    continue;
+                };
+                locations.extend(references::cross_doc_template_refs(
+                    doc_parse, doc_source, &doc_path, doc_uri, &tmpl_name, &cow,
+                ));
+            }
+
+            // Also search workspace files that are not currently open in the
+            // editor, reading them from disk. This ensures references are found
+            // regardless of which file was opened first.
+            if let Some(parent) = cow.parent()
+                && let Ok(ws_root) = workspace::discover_from(parent)
+            {
+                let mut ws_files = vec![ws_root.clone()];
+                if let Ok(refs) = workspace::referenced_files(&ws_root) {
+                    ws_files.extend(refs);
+                }
+                for ws_path in ws_files {
+                    let Some(ws_uri) = Uri::from_file_path(&ws_path) else {
+                        continue;
+                    };
+                    // Skip the current file and files already searched above.
+                    if ws_uri == uri || docs.contains_key(&ws_uri) {
+                        continue;
+                    }
+                    let Ok(ws_source) = std::fs::read_to_string(&ws_path) else {
+                        continue;
+                    };
+                    let ws_parse = ciane::parse(&ws_source);
+                    locations.extend(references::cross_doc_template_refs(
+                        &ws_parse, &ws_source, &ws_path, &ws_uri, &tmpl_name, &cow,
+                    ));
+                }
+            }
+        }
+
+        if locations.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(locations))
+        }
     }
 
     async fn prepare_rename(
@@ -178,7 +228,7 @@ impl LanguageServer for Backend {
         let uri = params.text_document.uri;
         let position = params.position;
         let docs = self.documents.lock().await;
-        let Some((parse, source)) = docs.get(&uri.to_string()) else {
+        let Some((parse, source)) = docs.get(&uri) else {
             return Ok(None);
         };
         let offset = util::position_to_offset(source, position);
@@ -190,7 +240,7 @@ impl LanguageServer for Backend {
         let position = params.text_document_position.position;
         let new_name = params.new_name;
         let docs = self.documents.lock().await;
-        let Some((parse, source)) = docs.get(&uri.to_string()) else {
+        let Some((parse, source)) = docs.get(&uri) else {
             return Ok(None);
         };
         let offset = util::position_to_offset(source, position);

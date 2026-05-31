@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use cianity_core::check;
+use cianity_core::{check, workspace};
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -89,4 +89,63 @@ fn invalid_inherit_use_file_missing() {
 #[test]
 fn invalid_inherit_template_not_in_file() {
     assert_check_fails("inherit_template_not_in_file");
+}
+
+// ── workspace check ───────────────────────────────────────────────────────────
+//
+// These tests replicate the `commands::check` flow — run check on the root
+// workflow.ci then run check on every file listed in its `use {}` block.
+
+fn workspace_fixture(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/workspace")
+        .join(name)
+        .join("workflow.ci")
+}
+
+fn run_workspace_check(root: &Path) -> anyhow::Result<()> {
+    let mut had_error = false;
+    if check::run(root).is_err() {
+        had_error = true;
+    }
+    let refs = workspace::referenced_files(root)?;
+    for path in &refs {
+        if check::run(path).is_err() {
+            had_error = true;
+        }
+    }
+    if had_error {
+        anyhow::bail!("workspace had errors");
+    }
+    Ok(())
+}
+
+fn assert_workspace_passes(name: &str) {
+    let root = workspace_fixture(name);
+    if let Err(e) = run_workspace_check(&root) {
+        panic!("{name} workspace should pass check: {e}");
+    }
+}
+
+fn assert_workspace_fails(name: &str) {
+    let root = workspace_fixture(name);
+    assert!(
+        run_workspace_check(&root).is_err(),
+        "{name} workspace should fail check but passed"
+    );
+}
+
+#[test]
+fn workspace_valid_root_and_referenced() {
+    assert_workspace_passes("valid_root_and_referenced");
+}
+
+#[test]
+fn workspace_invalid_referenced_parse_error() {
+    assert_workspace_fails("invalid_referenced_parse_error");
+}
+
+#[test]
+fn workspace_invalid_referenced_validation() {
+    assert_workspace_fails("invalid_referenced_validation");
 }
