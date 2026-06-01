@@ -477,3 +477,154 @@ workflow ci {
         "missing the `path` attribute",
     );
 }
+
+// ── invalid: unknown attributes ───────────────────────────────────────────────
+
+#[test]
+fn error_unknown_workflow_attr() {
+    assert_has_diagnostic(
+        r"
+workflow ci (foo = bar) {
+    stage build { job compile { cargo build } }
+}
+",
+        Severity::Error,
+        "unknown attribute `foo` on workflow",
+    );
+}
+
+#[test]
+fn error_unknown_stage_attr() {
+    assert_has_diagnostic(
+        r"
+workflow ci {
+    stage build (foo = bar) {
+        job compile { cargo build }
+    }
+}
+",
+        Severity::Error,
+        "unknown attribute `foo` on stage",
+    );
+}
+
+#[test]
+fn error_unknown_job_attr() {
+    assert_has_diagnostic(
+        r"
+workflow ci {
+    stage build {
+        job compile (foo = bar) { cargo build }
+    }
+}
+",
+        Severity::Error,
+        "unknown attribute `foo` on job",
+    );
+}
+
+#[test]
+fn error_unknown_template_attr() {
+    assert_has_diagnostic(
+        r"
+workflow ci {
+    stage build {
+        template base (foo = bar) [
+            step run { cargo build }
+        ]
+        job compile (inherit = base) [ steps, ]
+    }
+}
+",
+        Severity::Error,
+        "unknown attribute `foo` on template",
+    );
+}
+
+#[test]
+fn error_unknown_top_level_template_attr() {
+    assert_has_diagnostic(
+        r"
+workflow ci {
+    template base (foo = bar) [
+        step run { cargo build }
+    ]
+    stage build {
+        job compile (inherit = base) [ steps, ]
+    }
+}
+",
+        Severity::Error,
+        "unknown attribute `foo` on template",
+    );
+}
+
+#[test]
+fn error_unknown_use_attr() {
+    assert_has_diagnostic(
+        r"
+workflow ci {
+    use shared (path = ./shared.ci, foo = bar)
+    stage build { job compile { cargo build } }
+}
+",
+        Severity::Error,
+        "unknown attribute `foo` on use import",
+    );
+}
+
+// ── valid: all known attrs accepted without error ─────────────────────────────
+
+#[test]
+fn valid_all_job_attrs() {
+    assert_no_diagnostics(
+        r"
+workflow ci {
+    stage build {
+        template base [
+            step run { cargo build }
+        ]
+        job compile (
+            image = rust:latest,
+            inherit = base,
+            dependencies = [build.compile],
+        ) [ steps, ]
+    }
+}
+",
+    );
+}
+
+#[test]
+fn valid_all_template_attrs() {
+    assert_no_diagnostics(
+        r"
+workflow ci {
+    stage build {
+        template base (
+            image = rust:latest,
+            dependencies = [build.other],
+        ) [
+            step run { cargo build }
+        ]
+        job other { cargo check }
+        job compile (inherit = base) [ steps, ]
+    }
+}
+",
+    );
+}
+
+#[test]
+fn valid_stage_dependencies_attr() {
+    assert_no_diagnostics(
+        r"
+workflow ci {
+    stage build { job compile { cargo build } }
+    stage test (dependencies = [build.compile]) {
+        job run { cargo test }
+    }
+}
+",
+    );
+}

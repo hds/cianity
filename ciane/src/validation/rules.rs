@@ -14,6 +14,42 @@ const VALID_STRATEGIES: &[&str] = &[
     "none",
 ];
 
+const VALID_WORKFLOW_ATTRS: &[&str] = &["strategy"];
+const VALID_STAGE_ATTRS: &[&str] = &["dependencies"];
+const VALID_JOB_ATTRS: &[&str] = &["image", "inherit", "dependencies"];
+const VALID_TEMPLATE_ATTRS: &[&str] = &["image", "dependencies"];
+const VALID_USE_ATTRS: &[&str] = &["path"];
+
+fn check_unknown_attrs<N: HasAttrList>(
+    node: &N,
+    owner: &str,
+    valid_keys: &[&str],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let Some(al) = node.attr_list() else {
+        return;
+    };
+    for attr in al.attrs() {
+        let Some(key) = attr.key_text() else {
+            continue;
+        };
+        if !valid_keys.contains(&key.as_str()) {
+            let listed = valid_keys
+                .iter()
+                .map(|k| format!("`{k}`"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            diagnostics.push(Diagnostic {
+                severity: Severity::Error,
+                message: format!(
+                    "unknown attribute `{key}` on {owner}; valid attributes are {listed}"
+                ),
+                span: span_of(attr.syntax()),
+            });
+        }
+    }
+}
+
 /// Collect all semantic diagnostics from a parsed `Root` node.
 pub(super) fn check_root(root: &Root, diagnostics: &mut Vec<Diagnostic>) {
     for workflow in root.workflow_defs() {
@@ -25,6 +61,7 @@ pub(super) fn check_root(root: &Root, diagnostics: &mut Vec<Diagnostic>) {
 }
 
 fn check_workflow_def(workflow: &WorkflowDef, diagnostics: &mut Vec<Diagnostic>) {
+    check_unknown_attrs(workflow, "workflow", VALID_WORKFLOW_ATTRS, diagnostics);
     check_workflow_strategy(workflow, diagnostics);
     let Some(body) = workflow.body() else {
         return;
@@ -32,6 +69,9 @@ fn check_workflow_def(workflow: &WorkflowDef, diagnostics: &mut Vec<Diagnostic>)
     check_duplicate_workflow_stage_names(&body, diagnostics);
     check_duplicate_workflow_template_names(&body, diagnostics);
     let root_template_names: HashSet<SmolStr> = body.templates().filter_map(|t| t.name()).collect();
+    for tmpl in body.templates() {
+        check_unknown_attrs(&tmpl, "template", VALID_TEMPLATE_ATTRS, diagnostics);
+    }
     for stage in body.stages() {
         check_stage(&stage, &root_template_names, diagnostics);
     }
@@ -95,6 +135,8 @@ fn check_stage(
     root_templates: &HashSet<SmolStr>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    check_unknown_attrs(stage, "stage", VALID_STAGE_ATTRS, diagnostics);
+
     let Some(body) = stage.body() else {
         return;
     };
@@ -119,6 +161,7 @@ fn check_stage(
                 span: span_of(job.syntax()),
             });
         }
+        check_unknown_attrs(&job, "job", VALID_JOB_ATTRS, diagnostics);
         check_job_steps(&job, &all_template_names, diagnostics);
     }
     for tmpl in body.templates() {
@@ -131,6 +174,7 @@ fn check_stage(
                 span: span_of(tmpl.syntax()),
             });
         }
+        check_unknown_attrs(&tmpl, "template", VALID_TEMPLATE_ATTRS, diagnostics);
     }
 }
 
@@ -183,6 +227,7 @@ fn check_job_steps(
 }
 
 fn check_use_decl_attrs(decl: &UseDecl, diagnostics: &mut Vec<Diagnostic>) {
+    check_unknown_attrs(decl, "use import", VALID_USE_ATTRS, diagnostics);
     if decl.path().is_none() {
         diagnostics.push(Diagnostic {
             severity: Severity::Error,

@@ -149,3 +149,29 @@ fn build_fails_on_parse_errors() {
         "unexpected error message: {err}"
     );
 }
+
+#[test]
+fn build_fails_on_unknown_job_attr() {
+    let err = build::render_to_string(
+        "workflow ci { stage build { job compile (foo = bar) { cargo build } } }",
+        build::Target::Gitlab,
+    )
+    .expect_err("a file with an unknown job attr should not produce output");
+    assert!(
+        err.to_string().contains("validation errors"),
+        "unexpected error message: {err}"
+    );
+}
+
+#[test]
+fn build_fails_on_unknown_workflow_attr() {
+    let err = build::render_to_string(
+        "workflow ci (foo = bar) { stage build { job compile { cargo build } } }",
+        build::Target::Gitlab,
+    )
+    .expect_err("a file with an unknown workflow attr should not produce output");
+    assert!(
+        err.to_string().contains("validation errors"),
+        "unexpected error message: {err}"
+    );
+}

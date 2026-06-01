@@ -65,7 +65,7 @@ fn hover_for_bare_value(token: &SyntaxToken) -> Option<String> {
     let value = token.text();
     match key.as_str() {
         "inherit" => Some(format!("inherits steps from template `{value}`")),
-        "container" => Some(format!("runs in container `{value}`")),
+        "image" => Some(format!("runs in container image `{value}`")),
         "path" => Some(format!("imports workflow from `{value}`")),
         "strategy" => Some(format!("workflow strategy: `{value}`")),
         _ => None,
@@ -76,7 +76,7 @@ fn attr_key_doc(key: &str) -> Option<&'static str> {
     match key {
         "inherit" => Some("**inherit** — template whose steps this job inherits"),
         "dependencies" => Some("**dependencies** — jobs that must complete before this one"),
-        "container" => Some("**container** — Docker image to run the job in"),
+        "image" => Some("**image** — Docker image to run the job in"),
         "path" => Some("**path** — path to the imported workflow file"),
         "strategy" => Some("**strategy** — when this workflow runs"),
         _ => None,

@@ -4,7 +4,9 @@ use std::path::{Path, PathBuf};
 
 use ciane::{
     ast::{AstNode, Root},
+    error::Severity,
     parse,
+    validation::validate,
 };
 
 use super::ir::{self, Job, JobRef, Workflow, WorkflowStrategy};
@@ -22,6 +24,19 @@ pub(super) fn render_source(source: &str) -> anyhow::Result<String> {
 
     let root = Root::cast(result.syntax())
         .ok_or_else(|| anyhow::anyhow!("internal error: parse produced no Root node"))?;
+
+    let errors: Vec<_> = validate(&root)
+        .into_iter()
+        .filter(|d| d.severity == Severity::Error)
+        .collect();
+    if !errors.is_empty() {
+        let msgs = errors
+            .iter()
+            .map(|e| e.message.as_str())
+            .collect::<Vec<_>>()
+            .join("; ");
+        anyhow::bail!("file has validation errors: {msgs}");
+    }
 
     Ok(render(&ir::lower(&root)))
 }
@@ -42,6 +57,20 @@ pub(super) fn render_path(path: &Path) -> anyhow::Result<String> {
     }
     let root = Root::cast(result.syntax())
         .ok_or_else(|| anyhow::anyhow!("internal error: parse produced no Root node"))?;
+
+    let errors: Vec<_> = validate(&root)
+        .into_iter()
+        .filter(|d| d.severity == Severity::Error)
+        .collect();
+    if !errors.is_empty() {
+        let msgs = errors
+            .iter()
+            .map(|e| e.message.as_str())
+            .collect::<Vec<_>>()
+            .join("; ");
+        anyhow::bail!("file has validation errors: {msgs}");
+    }
+
     Ok(render(&ir::lower_with_path(&root, path)?))
 }
 

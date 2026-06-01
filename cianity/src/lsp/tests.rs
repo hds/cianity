@@ -375,10 +375,7 @@ fn completion_job_attr_key_offers_all_job_fields() {
         labels.contains(&"dependencies".to_owned()),
         "labels: {labels:?}"
     );
-    assert!(
-        labels.contains(&"container".to_owned()),
-        "labels: {labels:?}"
-    );
+    assert!(labels.contains(&"image".to_owned()), "labels: {labels:?}");
 }
 
 // ── definition ────────────────────────────────────────────────────────────────
