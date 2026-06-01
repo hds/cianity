@@ -9,9 +9,19 @@ use ciane::{
 
 // ─── IR types ────────────────────────────────────────────────────────────────
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum WorkflowStrategy {
+    #[default]
+    None,
+    DefaultBranch,
+    Reviews,
+    DefaultBranchAndReviews,
+}
+
 #[derive(Debug)]
 pub struct Workflow {
     pub stages: Vec<Stage>,
+    pub strategy: WorkflowStrategy,
 }
 
 impl Workflow {
@@ -77,12 +87,31 @@ struct TemplateData {
     needs: Vec<JobRef>,
 }
 
+fn strategy_from_root(root: &Root) -> WorkflowStrategy {
+    root.workflow_defs()
+        .next()
+        .and_then(|wd| wd.strategy())
+        .as_deref()
+        .map(strategy_from_str)
+        .unwrap_or_default()
+}
+
+fn strategy_from_str(s: &str) -> WorkflowStrategy {
+    match s {
+        "default_branch" => WorkflowStrategy::DefaultBranch,
+        "reviews" => WorkflowStrategy::Reviews,
+        "default_branch_and_reviews" => WorkflowStrategy::DefaultBranchAndReviews,
+        _ => WorkflowStrategy::None,
+    }
+}
+
 /// Lower a parsed `Root` AST node into the rich IR `Workflow`.
 ///
 /// Templates are resolved and inlined into their jobs; the returned `Workflow`
 /// contains only concrete jobs.
 #[must_use]
 pub fn lower(root: &Root) -> Workflow {
+    let strategy = strategy_from_root(root);
     let root_templates = collect_root_templates(root);
     let mut stages = Vec::new();
 
@@ -134,7 +163,7 @@ pub fn lower(root: &Root) -> Workflow {
         });
     }
 
-    Workflow { stages }
+    Workflow { stages, strategy }
 }
 
 /// Lower a parsed `Root` into a `Workflow`, resolving cross-file template
@@ -151,6 +180,7 @@ pub fn lower(root: &Root) -> Workflow {
 /// Returns `Err` if a referenced import file cannot be read, or if the named
 /// template is not found in that file.
 pub fn lower_with_path(root: &Root, path: &Path) -> anyhow::Result<Workflow> {
+    let strategy = strategy_from_root(root);
     let base = path.parent().unwrap_or(Path::new("."));
     let import_map = build_import_map(root, base);
     let root_templates = collect_root_templates(root);
@@ -216,7 +246,7 @@ pub fn lower_with_path(root: &Root, path: &Path) -> anyhow::Result<Workflow> {
         });
     }
 
-    Ok(Workflow { stages })
+    Ok(Workflow { stages, strategy })
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────

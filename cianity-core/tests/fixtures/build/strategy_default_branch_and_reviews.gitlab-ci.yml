@@ -1,0 +1,10 @@
+stages:
+  - build
+
+compile:
+  stage: build
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_MERGE_REQUEST_IID
+  script:
+    - cargo build

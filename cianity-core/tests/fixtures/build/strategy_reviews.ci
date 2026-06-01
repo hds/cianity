@@ -1,0 +1,5 @@
+workflow ci (strategy = reviews) {
+    stage build {
+        job compile { cargo build }
+    }
+}

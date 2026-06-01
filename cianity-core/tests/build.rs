@@ -110,6 +110,28 @@ fn build_cross_file_stage_template() {
     assert_gitlab_snapshot("cross_file_stage_template");
 }
 
+// ── workflow strategy tests ───────────────────────────────────────────────────
+
+#[test]
+fn build_strategy_default_branch() {
+    assert_gitlab_snapshot("strategy_default_branch");
+}
+
+#[test]
+fn build_strategy_reviews() {
+    assert_gitlab_snapshot("strategy_reviews");
+}
+
+#[test]
+fn build_strategy_default_branch_and_reviews() {
+    assert_gitlab_snapshot("strategy_default_branch_and_reviews");
+}
+
+#[test]
+fn build_strategy_none() {
+    assert_gitlab_snapshot("strategy_none");
+}
+
 // ── error cases ───────────────────────────────────────────────────────────────
 
 #[test]

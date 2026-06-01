@@ -1,0 +1,8 @@
+workflow ci (strategy = default_branch) {
+    stage build {
+        job compile { cargo build }
+    }
+    stage test {
+        job unit { cargo test }
+    }
+}

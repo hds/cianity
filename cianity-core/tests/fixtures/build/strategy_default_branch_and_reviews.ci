@@ -1,0 +1,5 @@
+workflow ci (strategy = default_branch_and_reviews) {
+    stage build {
+        job compile { cargo build }
+    }
+}

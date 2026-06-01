@@ -7,7 +7,7 @@ use ciane::{
     parse,
 };
 
-use super::ir::{self, Job, JobRef, Workflow};
+use super::ir::{self, Job, JobRef, Workflow, WorkflowStrategy};
 
 /// Parse `source` and render it as a GitLab CI YAML string.
 ///
@@ -75,7 +75,7 @@ fn render(workflow: &Workflow) -> String {
     for stage in &workflow.stages {
         for job in &stage.jobs {
             out.push('\n');
-            render_job(&mut out, job, &conflicts);
+            render_job(&mut out, job, &conflicts, workflow.strategy);
         }
     }
 
@@ -109,7 +109,12 @@ fn dep_name(dep: &JobRef, conflicts: &HashSet<String>) -> String {
     job_name(&dep.stage, &dep.job, conflicts)
 }
 
-fn render_job(out: &mut String, job: &Job, conflicts: &HashSet<String>) {
+fn render_job(
+    out: &mut String,
+    job: &Job,
+    conflicts: &HashSet<String>,
+    strategy: WorkflowStrategy,
+) {
     let _ = writeln!(out, "{}:", job_name(&job.stage, &job.name, conflicts));
     let _ = writeln!(out, "  stage: {}", job.stage);
 
@@ -128,6 +133,14 @@ fn render_job(out: &mut String, job: &Job, conflicts: &HashSet<String>) {
         }
     }
 
+    let rules = strategy_rules(strategy);
+    if !rules.is_empty() {
+        out.push_str("  rules:\n");
+        for rule in rules {
+            let _ = writeln!(out, "    - if: {rule}");
+        }
+    }
+
     out.push_str("  script:\n");
     if job.script.is_empty() {
         out.push_str("    - \"\"\n");
@@ -135,6 +148,18 @@ fn render_job(out: &mut String, job: &Job, conflicts: &HashSet<String>) {
         for cmd in &job.script {
             write_script_item(out, cmd);
         }
+    }
+}
+
+fn strategy_rules(strategy: WorkflowStrategy) -> &'static [&'static str] {
+    match strategy {
+        WorkflowStrategy::None => &[],
+        WorkflowStrategy::DefaultBranch => &["$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH"],
+        WorkflowStrategy::Reviews => &["$CI_MERGE_REQUEST_IID"],
+        WorkflowStrategy::DefaultBranchAndReviews => &[
+            "$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH",
+            "$CI_MERGE_REQUEST_IID",
+        ],
     }
 }
 
