@@ -1,15 +1,10 @@
 workflow ci {
-    use {
-        workflow (
-            location = ./shared.ci,
-            name = shared,
-        )
-    }
-    
+    use shared ( path = ./shared.ci )
+
     stage build {
         job compile { cargo build --release }
     }
-    
+
     stage test ( dependencies = [build.compile] ) {
         job run { cargo test }
     }

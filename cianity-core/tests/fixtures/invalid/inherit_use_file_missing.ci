@@ -1,11 +1,6 @@
 workflow ci {
-    use {
-        workflow (
-            location = ../shared/nonexistent.ci,
-            name = shared,
-        )
-    }
-    
+    use shared ( path = ../shared/nonexistent.ci )
+
     stage test {
         job unit ( inherit = shared/base ) [
             steps,

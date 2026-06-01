@@ -6,7 +6,7 @@
   "patterns": [
     { "include": "#comment" },
     { "include": "#workflow-def" },
-    { "include": "#use-block" },
+    { "include": "#use-decl" },
     { "include": "#stage" },
     { "include": "#template-def" },
     { "include": "#defaults" }
@@ -31,33 +31,16 @@
       ]
     },
 
-    "use-block": {
-      "comment": "end: } (non-zero-width) — no lookbehind needed",
-      "begin": "\\b(use)\\b",
-      "end": "\\}",
-      "beginCaptures": {
-        "1": { "name": "keyword.other.ciane" }
-      },
-      "endCaptures": { "0": { "name": "punctuation.section.block.end.ciane" } },
-      "patterns": [
-        { "include": "#comment" },
-        { "match": "\\{", "name": "punctuation.section.block.begin.ciane" },
-        { "include": "#workflow-import" }
-      ]
-    },
-
-    "workflow-import": {
-      "comment": "begin consumes ( so end: ) is non-zero-width — no lookbehind needed",
-      "begin": "\\b(workflow)\\b\\s*(\\()",
-      "end": "\\)",
+    "use-decl": {
+      "comment": "use name (attrs)? — highlights keyword, name, and optional attr list; ends at EOL",
+      "begin": "\\b(use)\\b\\s+([a-zA-Z_][a-zA-Z0-9_-]*)",
+      "end": "$",
       "beginCaptures": {
         "1": { "name": "keyword.other.ciane" },
-        "2": { "name": "punctuation.section.parens.begin.ciane" }
+        "2": { "name": "entity.name.function.ciane" }
       },
-      "endCaptures": { "0": { "name": "punctuation.section.parens.end.ciane" } },
       "patterns": [
-        { "include": "#comment" },
-        { "include": "#attr" }
+        { "include": "#attr-list" }
       ]
     },
 
@@ -122,6 +105,7 @@
       "endCaptures": { "0": { "name": "punctuation.section.brackets.end.ciane" } },
       "patterns": [
         { "include": "#comment" },
+        { "include": "#attr-list" },
         { "include": "#step-list" }
       ]
     },

@@ -1,16 +1,11 @@
 workflow ci {
-    use {
-        workflow (
-            location = ../shared/templates.ci,
-            name = shared,
-        )
-    }
-    
+    use shared ( path = ../shared/templates.ci )
+
     stage test {
         job unit ( inherit = shared/base ) [
             steps,
         ]
-    
+
         job integration ( inherit = shared/base ) [
             step setup,
             step run { cargo test --test '*' }

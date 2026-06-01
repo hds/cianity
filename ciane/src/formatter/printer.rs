@@ -1,8 +1,8 @@
 use crate::{
     ast::{
         AstNode, Attr, AttrList, AttrValue, HasAttrList, HasName, Job, JobBodyInline, JobBodySteps,
-        Ref, RefList, Root, Stage, StageBody, Step, StepsKeyword, TemplateDef, UseBlock,
-        WorkflowBody, WorkflowDef, WorkflowImport,
+        Ref, RefList, Root, Stage, StageBody, Step, StepsKeyword, TemplateDef, UseDecl,
+        WorkflowBody, WorkflowDef,
     },
     syntax::SyntaxKind,
 };
@@ -76,8 +76,8 @@ impl Printer {
         let mut first = true;
         for child in body.syntax().children() {
             match child.kind() {
-                SyntaxKind::UseBlock => {
-                    if let Some(use_block) = UseBlock::cast(child) {
+                SyntaxKind::UseDecl => {
+                    if let Some(use_decl) = UseDecl::cast(child) {
                         if first {
                             first = false;
                         } else {
@@ -85,7 +85,7 @@ impl Printer {
                         }
                         self.push('\n');
                         self.push_indent();
-                        self.print_use_block(&use_block);
+                        self.print_use_decl(&use_decl);
                     }
                 }
                 SyntaxKind::Stage => {
@@ -121,10 +121,10 @@ impl Printer {
     fn print_workflow_body_unbraced(&mut self, body: &WorkflowBody) {
         for child in body.syntax().children() {
             match child.kind() {
-                SyntaxKind::UseBlock => {
-                    if let Some(use_block) = UseBlock::cast(child) {
+                SyntaxKind::UseDecl => {
+                    if let Some(use_decl) = UseDecl::cast(child) {
                         self.push_str("\n\n");
-                        self.print_use_block(&use_block);
+                        self.print_use_decl(&use_decl);
                     }
                 }
                 SyntaxKind::Stage => {
@@ -144,25 +144,12 @@ impl Printer {
         }
     }
 
-    // ── use block ────────────────────────────────────────────────────────────
+    // ── use decl ─────────────────────────────────────────────────────────────
 
-    fn print_use_block(&mut self, block: &UseBlock) {
-        self.push_str("use {");
-        self.indent += 1;
-        for import in block.imports() {
-            self.push('\n');
-            self.push_indent();
-            self.print_workflow_import(&import);
-        }
-        self.indent -= 1;
-        self.push('\n');
-        self.push_indent();
-        self.push_str("}");
-    }
-
-    fn print_workflow_import(&mut self, import: &WorkflowImport) {
-        self.push_str("workflow");
-        if let Some(attrs) = import.attr_list() {
+    fn print_use_decl(&mut self, decl: &UseDecl) {
+        self.push_str("use ");
+        self.push_str(decl.name().as_deref().unwrap_or(""));
+        if let Some(attrs) = decl.attr_list() {
             self.print_attr_list(&attrs);
         }
     }

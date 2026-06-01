@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use smol_str::SmolStr;
 
 use crate::{
-    ast::{AstNode, HasAttrList, HasName, Root, Stage, WorkflowBody, WorkflowDef},
+    ast::{AstNode, HasAttrList, HasName, Root, Stage, UseDecl, WorkflowBody, WorkflowDef},
     error::{Diagnostic, Severity},
 };
 
@@ -19,10 +19,8 @@ pub(super) fn check_root(root: &Root, diagnostics: &mut Vec<Diagnostic>) {
     for workflow in root.workflow_defs() {
         check_workflow_def(&workflow, diagnostics);
     }
-    for use_block in root.use_blocks() {
-        for import in use_block.imports() {
-            check_workflow_import_attrs(&import, diagnostics);
-        }
+    for use_decl in root.use_decls() {
+        check_use_decl_attrs(&use_decl, diagnostics);
     }
 }
 
@@ -184,22 +182,12 @@ fn check_job_steps(
     }
 }
 
-fn check_workflow_import_attrs(
-    import: &crate::ast::WorkflowImport,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    if import.location().is_none() {
+fn check_use_decl_attrs(decl: &UseDecl, diagnostics: &mut Vec<Diagnostic>) {
+    if decl.path().is_none() {
         diagnostics.push(Diagnostic {
             severity: Severity::Error,
-            message: "`workflow` import is missing the `location` attribute".to_owned(),
-            span: span_of(import.syntax()),
-        });
-    }
-    if import.name().is_none() {
-        diagnostics.push(Diagnostic {
-            severity: Severity::Error,
-            message: "`workflow` import is missing the `name` attribute".to_owned(),
-            span: span_of(import.syntax()),
+            message: "`use` import is missing the `path` attribute".to_owned(),
+            span: span_of(decl.syntax()),
         });
     }
 }

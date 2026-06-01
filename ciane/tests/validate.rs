@@ -31,15 +31,6 @@ fn assert_has_diagnostic(src: &str, severity: Severity, needle: &str) {
     );
 }
 
-fn assert_diagnostic_count(src: &str, severity: Severity, expected: usize) {
-    let diags = run(src);
-    let count = diags.iter().filter(|d| d.severity == severity).count();
-    assert_eq!(
-        count, expected,
-        "expected {expected} {severity:?} diagnostic(s), got: {diags:?}"
-    );
-}
-
 // ── valid: workflow strategy ──────────────────────────────────────────────────
 
 #[test]
@@ -189,9 +180,7 @@ fn valid_workflow_import_complete() {
     assert_no_diagnostics(
         r"
 workflow ci {
-    use {
-        workflow(location = ./shared.ci, name = shared)
-    }
+    use shared ( path = ./shared.ci )
 
     stage build {
         job compile { cargo build }
@@ -473,13 +462,11 @@ workflow ci {
 }
 
 #[test]
-fn error_workflow_import_missing_location() {
+fn error_use_import_missing_path() {
     assert_has_diagnostic(
         r"
 workflow ci {
-    use {
-        workflow(name = shared)
-    }
+    use shared
 
     stage build {
         job compile { cargo build }
@@ -487,44 +474,6 @@ workflow ci {
 }
 ",
         Severity::Error,
-        "missing the `location` attribute",
-    );
-}
-
-#[test]
-fn error_workflow_import_missing_name() {
-    assert_has_diagnostic(
-        r"
-workflow ci {
-    use {
-        workflow(location = ./shared.ci)
-    }
-
-    stage build {
-        job compile { cargo build }
-    }
-}
-",
-        Severity::Error,
-        "missing the `name` attribute",
-    );
-}
-
-#[test]
-fn error_workflow_import_missing_both_attrs() {
-    assert_diagnostic_count(
-        r"
-workflow ci {
-    use {
-        workflow()
-    }
-
-    stage build {
-        job compile { cargo build }
-    }
-}
-",
-        Severity::Error,
-        2,
+        "missing the `path` attribute",
     );
 }

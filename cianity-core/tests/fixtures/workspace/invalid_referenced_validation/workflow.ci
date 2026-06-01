@@ -1,11 +1,6 @@
 workflow ci {
-    use {
-        workflow (
-            location = ./bad.ci,
-            name = bad,
-        )
-    }
-    
+    use bad ( path = ./bad.ci )
+
     stage deploy {
         job run { ./deploy.sh }
     }

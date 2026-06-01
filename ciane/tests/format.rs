@@ -54,23 +54,20 @@ fn stage_with_attr_list() {
 }
 
 #[test]
-fn use_block() {
-    let src = "workflow w { use { workflow(location=./a.ci,name=a) } }";
+fn use_decl() {
+    let src = "workflow w { use a ( path = ./a.ci ) }";
     let out = format(src);
-    assert_eq!(
-        out,
-        "workflow w {\n    use {\n        workflow (\n            location = ./a.ci,\n            name = a,\n        )\n    }\n}\n"
-    );
+    assert_eq!(out, "workflow w {\n    use a ( path = ./a.ci )\n}\n");
     check_idempotent(src);
 }
 
 #[test]
-fn use_block_then_stage() {
-    let src = "workflow w { use { workflow(location=./a.ci,name=a) } stage build { job compile { cargo build } } }";
+fn use_decl_then_stage() {
+    let src = "workflow w { use a ( path = ./a.ci ) stage build { job compile { cargo build } } }";
     let out = format(src);
     assert!(
-        out.starts_with("workflow w {\n    use {"),
-        "should start with use block"
+        out.starts_with("workflow w {\n    use a"),
+        "should start with use decl"
     );
     assert!(
         out.contains("\n\n    stage build"),
@@ -155,10 +152,10 @@ fn stage_then_top_level_template() {
 }
 
 #[test]
-fn use_block_then_top_level_template_then_stage() {
-    let src = "workflow w { use { workflow(location=./a.ci,name=a) } template t [ step s { cmd } ] stage b { job j { echo } } }";
+fn use_decl_then_top_level_template_then_stage() {
+    let src = "workflow w { use a ( path = ./a.ci ) template t [ step s { cmd } ] stage b { job j { echo } } }";
     let out = format(src);
-    assert!(out.starts_with("workflow w {\n    use {"));
+    assert!(out.starts_with("workflow w {\n    use a"));
     assert!(out.contains("\n\n    template t ["));
     assert!(out.contains("\n\n    stage b {"));
     check_idempotent(src);

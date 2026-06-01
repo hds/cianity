@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use ciane::{
-    ast::{AstNode, Attr, AttrValue, HasName, Root, Stage, WorkflowImport},
+    ast::{AstNode, Attr, AttrValue, HasName, Root, Stage, UseDecl},
     parse,
     parser::Parse,
     syntax::{SyntaxKind, SyntaxNode, SyntaxToken},
@@ -115,7 +115,7 @@ fn resolve_dependency(
     })
 }
 
-// ─── use block location ───────────────────────────────────────────────────────
+// ─── use decl path ───────────────────────────────────────────────────────────
 
 fn resolve_location_attr(token: &SyntaxToken, file_path: &Path) -> Option<Location> {
     if token.kind() != SyntaxKind::BareValue {
@@ -123,11 +123,11 @@ fn resolve_location_attr(token: &SyntaxToken, file_path: &Path) -> Option<Locati
     }
     let attr_value = AttrValue::cast(token.parent()?)?;
     let attr = Attr::cast(attr_value.syntax().parent()?)?;
-    if attr.key_text().as_deref() != Some("location") {
+    if attr.key_text().as_deref() != Some("path") {
         return None;
     }
-    // Confirm we are inside a WorkflowImport (AttrList → WorkflowImport).
-    let _ = WorkflowImport::cast(attr.syntax().parent()?.parent()?)?;
+    // Confirm we are inside a UseDecl (AttrList → UseDecl).
+    let _ = UseDecl::cast(attr.syntax().parent()?.parent()?)?;
 
     let base = file_path.parent().unwrap_or(Path::new("."));
     let target = base.join(token.text());
@@ -142,21 +142,20 @@ fn resolve_location_attr(token: &SyntaxToken, file_path: &Path) -> Option<Locati
     Some(Location { uri, range })
 }
 
-// ─── use block name ──────────────────────────────────────────────────────────
+// ─── use decl name ────────────────────────────────────────────────────────────
 
 fn resolve_import_name(token: &SyntaxToken, file_path: &Path) -> Option<Location> {
-    if token.kind() != SyntaxKind::BareValue {
+    if token.kind() != SyntaxKind::Ident {
         return None;
     }
-    let attr_value = AttrValue::cast(token.parent()?)?;
-    let attr = Attr::cast(attr_value.syntax().parent()?)?;
-    if attr.key_text().as_deref() != Some("name") {
+    let name_node = token.parent()?;
+    if name_node.kind() != SyntaxKind::Name {
         return None;
     }
-    let import = WorkflowImport::cast(attr.syntax().parent()?.parent()?)?;
-    let location_val = import.location()?;
+    let use_decl = UseDecl::cast(name_node.parent()?)?;
+    let path_val = use_decl.path()?;
     let base = file_path.parent().unwrap_or(Path::new("."));
-    let target = base.join(location_val.as_str());
+    let target = base.join(path_val.as_str());
     if !target.exists() {
         return None;
     }
@@ -172,13 +171,11 @@ fn resolve_import_name(token: &SyntaxToken, file_path: &Path) -> Option<Location
 
 fn resolve_import_path(root: &Root, import_name: &str, file_path: &Path) -> Option<PathBuf> {
     let base = file_path.parent().unwrap_or(Path::new("."));
-    for ub in root.use_blocks() {
-        for imp in ub.imports() {
-            if imp.name().as_deref() == Some(import_name)
-                && let Some(loc) = imp.location()
-            {
-                return Some(base.join(loc.as_str()));
-            }
+    for imp in root.use_decls() {
+        if imp.name().as_deref() == Some(import_name)
+            && let Some(loc) = imp.path()
+        {
+            return Some(base.join(loc.as_str()));
         }
     }
     None

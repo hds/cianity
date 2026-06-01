@@ -58,10 +58,8 @@ pub enum SyntaxKind {
     WorkflowDef,
     /// The body of a `WorkflowDef` (may or may not be brace-wrapped).
     WorkflowBody,
-    /// `use { ... }` import block.
-    UseBlock,
-    /// `workflow ( location = …, name = … )` inside a use block.
-    WorkflowImport,
+    /// `use name (attrs)?` — a single external workflow import statement.
+    UseDecl,
     /// `( key = val, … )` attribute list.
     AttrList,
     /// A single `key = value` attribute.

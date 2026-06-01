@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use ciane::{
-    ast::{AstNode, Attr, AttrValue, HasAttrList, HasName, Root, Stage, WorkflowImport},
+    ast::{AstNode, Attr, AttrValue, HasAttrList, HasName, Root, Stage},
     parse,
     parser::Parse,
     syntax::{SyntaxKind, SyntaxNode, SyntaxToken},
@@ -67,6 +67,24 @@ fn find_ident(
                     source,
                     current_uri,
                 ))
+            }
+            SyntaxKind::UseDecl => {
+                let import_name = token.text();
+                let prefix = format!("{import_name}/");
+                let mut locations = Vec::new();
+                if include_declaration {
+                    locations.push(Location {
+                        uri: current_uri.clone(),
+                        range: range_to_lsp(source, token.text_range()),
+                    });
+                }
+                for tok in inherit_tokens_with_ns_prefix(root, &prefix) {
+                    locations.push(Location {
+                        uri: current_uri.clone(),
+                        range: range_to_lsp(source, tok.text_range()),
+                    });
+                }
+                Some(locations)
             }
             _ => None,
         };
@@ -148,33 +166,6 @@ fn find_bare_value(
         return Some(template_refs(&stage, tmpl_name, decl, source, current_uri));
     }
 
-    // `name` attr value inside a WorkflowImport: find all `inherit = importname/...` usages.
-    let is_use_import_name = token
-        .parent()
-        .and_then(AttrValue::cast)
-        .and_then(|av| Attr::cast(av.syntax().parent()?))
-        .filter(|a| a.key_text().as_deref() == Some("name"))
-        .and_then(|a| WorkflowImport::cast(a.syntax().parent()?.parent()?))
-        .is_some();
-    if is_use_import_name {
-        let import_name = token.text();
-        let prefix = format!("{import_name}/");
-        let mut locations = Vec::new();
-        if include_declaration {
-            locations.push(Location {
-                uri: current_uri.clone(),
-                range: range_to_lsp(source, token.text_range()),
-            });
-        }
-        for tok in inherit_tokens_with_ns_prefix(root, &prefix) {
-            locations.push(Location {
-                uri: current_uri.clone(),
-                range: range_to_lsp(source, tok.text_range()),
-            });
-        }
-        return Some(locations);
-    }
-
     None
 }
 
@@ -216,12 +207,11 @@ pub(super) fn cross_doc_template_refs(
         return Vec::new();
     };
 
-    // Collect all import names in this document whose location resolves to `defined_in`.
+    // Collect all import names in this document whose path resolves to `defined_in`.
     let import_names: Vec<String> = root
-        .use_blocks()
-        .flat_map(|ub| ub.imports().collect::<Vec<_>>())
+        .use_decls()
         .filter_map(|imp| {
-            let loc = imp.location()?;
+            let loc = imp.path()?;
             let canon = base.join(loc.as_str()).canonicalize().ok()?;
             if canon == defined_in_canon {
                 Some(imp.name()?.to_string())
@@ -308,14 +298,12 @@ fn cross_file_template_location(
     let base = file_path.parent().unwrap_or(Path::new("."));
     let import_path = {
         let mut found = None;
-        'search: for ub in root.use_blocks() {
-            for imp in ub.imports() {
-                if imp.name().as_deref() == Some(import_name)
-                    && let Some(loc) = imp.location()
-                {
-                    found = Some(base.join(loc.as_str()));
-                    break 'search;
-                }
+        for imp in root.use_decls() {
+            if imp.name().as_deref() == Some(import_name)
+                && let Some(loc) = imp.path()
+            {
+                found = Some(base.join(loc.as_str()));
+                break;
             }
         }
         found?

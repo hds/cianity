@@ -184,7 +184,7 @@ fn attr_name_completions(owner: Option<SyntaxKind>) -> Vec<CompletionItem> {
     let names: &[&str] = match owner {
         Some(SyntaxKind::Job) => &["inherit", "dependencies", "container"],
         Some(SyntaxKind::TemplateDef) => &["image", "dependencies"],
-        Some(SyntaxKind::WorkflowImport) => &["location", "name"],
+        Some(SyntaxKind::UseDecl) => &["path"],
         Some(SyntaxKind::WorkflowDef) => &["strategy"],
         _ => &[],
     };

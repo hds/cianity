@@ -348,11 +348,9 @@ fn job_script(job: &ast::Job, template_steps: &[(String, String)]) -> Vec<String
 
 fn build_import_map(root: &Root, base: &Path) -> HashMap<String, PathBuf> {
     let mut map = HashMap::new();
-    for ub in root.use_blocks() {
-        for imp in ub.imports() {
-            if let Some((name, loc)) = imp.name().zip(imp.location()) {
-                map.insert(name.to_string(), base.join(loc.as_str()));
-            }
+    for imp in root.use_decls() {
+        if let Some((name, path)) = imp.name().zip(imp.path()) {
+            map.insert(name.to_string(), base.join(path.as_str()));
         }
     }
     map

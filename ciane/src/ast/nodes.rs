@@ -33,8 +33,7 @@ macro_rules! ast_node {
 ast_node!(Root, Root);
 ast_node!(WorkflowDef, WorkflowDef);
 ast_node!(WorkflowBody, WorkflowBody);
-ast_node!(UseBlock, UseBlock);
-ast_node!(WorkflowImport, WorkflowImport);
+ast_node!(UseDecl, UseDecl);
 ast_node!(AttrList, AttrList);
 ast_node!(Attr, Attr);
 ast_node!(AttrValue, AttrValue);
@@ -56,12 +55,13 @@ impl HasName for Stage {}
 impl HasName for Job {}
 impl HasName for TemplateDef {}
 impl HasName for Step {}
+impl HasName for UseDecl {}
 
 impl HasAttrList for WorkflowDef {}
 impl HasAttrList for Stage {}
 impl HasAttrList for Job {}
 impl HasAttrList for TemplateDef {}
-impl HasAttrList for WorkflowImport {}
+impl HasAttrList for UseDecl {}
 
 // ─── Root ─────────────────────────────────────────────────────────────────────
 
@@ -71,11 +71,11 @@ impl Root {
         self.0.children().filter_map(WorkflowDef::cast)
     }
 
-    /// All `UseBlock` nodes across every workflow in this file.
-    pub fn use_blocks(&self) -> impl Iterator<Item = UseBlock> + '_ {
+    /// All `UseDecl` nodes across every workflow in this file.
+    pub fn use_decls(&self) -> impl Iterator<Item = UseDecl> + '_ {
         self.workflow_defs().flat_map(|wd| {
             wd.body()
-                .map_or_else(Vec::new, |b| b.use_blocks().collect::<Vec<_>>())
+                .map_or_else(Vec::new, |b| b.use_decls().collect::<Vec<_>>())
         })
     }
 
@@ -118,9 +118,9 @@ impl WorkflowDef {
 // ─── WorkflowBody ─────────────────────────────────────────────────────────────
 
 impl WorkflowBody {
-    /// All `UseBlock` children.
-    pub fn use_blocks(&self) -> impl Iterator<Item = UseBlock> + '_ {
-        self.0.children().filter_map(UseBlock::cast)
+    /// All `UseDecl` children.
+    pub fn use_decls(&self) -> impl Iterator<Item = UseDecl> + '_ {
+        self.0.children().filter_map(UseDecl::cast)
     }
 
     /// All `Stage` children.
@@ -142,34 +142,15 @@ impl WorkflowBody {
     }
 }
 
-// ─── UseBlock ─────────────────────────────────────────────────────────────────
+// ─── UseDecl ──────────────────────────────────────────────────────────────────
 
-impl UseBlock {
-    /// All `WorkflowImport` children.
-    pub fn imports(&self) -> impl Iterator<Item = WorkflowImport> + '_ {
-        self.0.children().filter_map(WorkflowImport::cast)
-    }
-}
-
-// ─── WorkflowImport ───────────────────────────────────────────────────────────
-
-impl WorkflowImport {
-    /// The `location` attribute value, if present.
+impl UseDecl {
+    /// The `path` attribute value, if present.
     #[must_use]
-    pub fn location(&self) -> Option<SmolStr> {
-        self.attr_value_for("location")
-    }
-
-    /// The `name` attribute value, if present.
-    #[must_use]
-    pub fn name(&self) -> Option<SmolStr> {
-        self.attr_value_for("name")
-    }
-
-    fn attr_value_for(&self, key: &str) -> Option<SmolStr> {
+    pub fn path(&self) -> Option<SmolStr> {
         self.attr_list()?
             .attrs()
-            .find(|a| a.key_text().as_deref() == Some(key))
+            .find(|a| a.key_text().as_deref() == Some("path"))
             .and_then(|a| a.value_text())
     }
 }

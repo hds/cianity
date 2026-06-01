@@ -93,9 +93,7 @@ fn kw_use() {
     assert_no_errors(
         r"
 workflow ci {
-    use {
-        workflow(location = ./shared.ci, name = shared)
-    }
+    use shared ( path = ./shared.ci )
 
     stage build {
         job compile { cargo build }
@@ -106,17 +104,11 @@ workflow ci {
 }
 
 #[test]
-fn kw_workflow_import() {
-    // `workflow` is only valid inside a `use` block.
+fn kw_use_inline() {
     assert_no_errors(
         r"
 workflow ci {
-    use {
-        workflow(
-            location = ./templates/base.ci,
-            name = base,
-        )
-    }
+    use base ( path = ./templates/base.ci )
 
     stage check {
         job lint { cargo clippy }
@@ -346,12 +338,7 @@ fn comprehensive_example() {
     assert_no_errors(
         r#"
 workflow ci {
-    use {
-        workflow(
-            location = other/dir/templates.ci
-            name = good_defaults
-        )
-    }
+    use good_defaults ( path = other/dir/templates.ci )
 
     stage setup {
         job prepare_credentials {
@@ -531,44 +518,17 @@ fn error_workflow_missing_name() {
 }
 
 #[test]
-fn error_use_missing_brace() {
+fn error_use_missing_name() {
     assert_has_error(
         r"
 workflow ci {
-    use stage build {
+    use ( path = ./foo.ci )
+    stage build {
         job compile { cargo build }
     }
 }
 ",
-        "expected LBrace",
-    );
-}
-
-#[test]
-fn error_use_block_non_workflow_item() {
-    assert_has_error(
-        r"
-workflow ci {
-    use {
-        stage
-    }
-}
-",
-        "expected `workflow`",
-    );
-}
-
-#[test]
-fn error_workflow_import_missing_paren() {
-    assert_has_error(
-        r"
-workflow ci {
-    use {
-        workflow location = ./foo.ci, name = foo
-    }
-}
-",
-        "expected `(` after `workflow`",
+        "expected identifier for name",
     );
 }
 

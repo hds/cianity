@@ -1,11 +1,6 @@
 workflow ci {
-    use {
-        workflow (
-            location = ./shared.ci,
-            name = shared,
-        )
-    }
-    
+    use shared ( path = ./shared.ci )
+
     stage build {
         job compile ( inherit = shared/compile ) [
             steps,

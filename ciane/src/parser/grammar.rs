@@ -48,7 +48,7 @@ fn workflow_body(p: &mut Parser<'_>) {
             break;
         }
         match p.current() {
-            SyntaxKind::KwUse => use_block(p),
+            SyntaxKind::KwUse => use_decl(p),
             SyntaxKind::KwStage => stage(p),
             SyntaxKind::KwTemplate => template_def(p),
             SyntaxKind::KwDefaults => {
@@ -68,30 +68,14 @@ fn workflow_body(p: &mut Parser<'_>) {
     p.finish_node();
 }
 
-// ─── use block ───────────────────────────────────────────────────────────────
+// ─── use decl ────────────────────────────────────────────────────────────────
 
-fn use_block(p: &mut Parser<'_>) {
-    p.start_node(SyntaxKind::UseBlock);
+fn use_decl(p: &mut Parser<'_>) {
+    p.start_node(SyntaxKind::UseDecl);
     p.bump(); // `use`
-    p.expect(SyntaxKind::LBrace);
-    while !p.at(SyntaxKind::RBrace) && !p.at(SyntaxKind::Eof) {
-        if p.at(SyntaxKind::KwWorkflow) {
-            workflow_import(p);
-        } else {
-            p.error_bump("expected `workflow`");
-        }
-    }
-    p.expect(SyntaxKind::RBrace);
-    p.finish_node();
-}
-
-fn workflow_import(p: &mut Parser<'_>) {
-    p.start_node(SyntaxKind::WorkflowImport);
-    p.bump(); // `workflow`
+    name(p);
     if p.at(SyntaxKind::LParen) {
         attr_list_body(p);
-    } else {
-        p.error("expected `(` after `workflow`");
     }
     p.finish_node();
 }

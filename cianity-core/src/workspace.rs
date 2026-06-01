@@ -44,13 +44,11 @@ pub fn referenced_files(root: &Path) -> anyhow::Result<Vec<PathBuf>> {
     let base = root.parent().unwrap_or(Path::new("."));
 
     let mut paths: Vec<PathBuf> = Vec::new();
-    for use_block in ast_root.use_blocks() {
-        for import in use_block.imports() {
-            if let Some(loc) = import.location() {
-                let path = base.join(loc.as_str());
-                if path.exists() {
-                    paths.push(path);
-                }
+    for use_decl in ast_root.use_decls() {
+        if let Some(loc) = use_decl.path() {
+            let path = base.join(loc.as_str());
+            if path.exists() {
+                paths.push(path);
             }
         }
     }

@@ -12,7 +12,7 @@ syntax keyword cianeTodo    TODO FIXME NOTE HACK contained
 " ── Top-level keywords ────────────────────────────────────────────────────────
 " Each keyword starts a nextgroup chain so the correct block type is used
 " downstream (structural vs shell).
-syntax keyword cianeUseKw      use      nextgroup=cianeUseBlock      skipwhite skipnl
+syntax keyword cianeUseKw      use      nextgroup=cianeUseName       skipwhite
 syntax keyword cianeStageKw    stage    nextgroup=cianeStageName     skipwhite
 syntax keyword cianeDefaultsKw defaults nextgroup=cianeDefaultsAttrs skipwhite
 
@@ -49,7 +49,12 @@ syntax keyword cianeTemplateKw template nextgroup=cianeTemplateName skipwhite co
 
 syntax match cianeTemplateName "\<[a-zA-Z_][a-zA-Z0-9_-]*\>"
       \ contained
-      \ nextgroup=cianeBracketList skipwhite skipnl
+      \ nextgroup=cianeTemplateAttrs,cianeBracketList skipwhite skipnl
+
+syntax region cianeTemplateAttrs matchgroup=cianeParen start="(" end=")"
+      \ contained nextgroup=cianeBracketList skipwhite skipnl
+      \ contains=cianeAttrKey,cianeEq,cianeBareValue,cianeNumber,cianeBracketList,cianeComma,cianeComment
+      \ fold
 
 " ── Step list / ref list: [ ... ] ─────────────────────────────────────────────
 " Used for job step-lists, template bodies, and dependency ref-lists in attrs.
@@ -71,12 +76,8 @@ syntax region cianeShellBlock matchgroup=cianeBrace start="{" end="}"
       \ contained contains=NONE fold
 
 " ── Workflow def (top-level) ─────────────────────────────────────────────────
-" `workflow` is valid both at the top level (workflow def) and inside a use
-" block (workflow import).  A single keyword covers both: nextgroup tries
-" cianeWorkflowDefName first (matches an ident — def case), then falls back to
-" cianeWorkflowAttrs (matches `(` — import case).
 syntax keyword cianeWorkflowKw workflow
-      \ nextgroup=cianeWorkflowDefName,cianeWorkflowAttrs
+      \ nextgroup=cianeWorkflowDefName
       \ skipwhite
 
 syntax match cianeWorkflowDefName "\<[a-zA-Z_][a-zA-Z0-9_-]*\>"
@@ -94,13 +95,12 @@ syntax region cianeWorkflowDefBlock matchgroup=cianeBrace start="{" end="}"
       \ contains=cianeUseKw,cianeStageKw,cianeTemplateKw,cianeDefaultsKw,cianeComment
       \ fold
 
-" ── Use block ─────────────────────────────────────────────────────────────────
-syntax region cianeUseBlock matchgroup=cianeBrace start="{" end="}"
+" ── Use decl ─────────────────────────────────────────────────────────────────
+syntax match cianeUseName "\<[a-zA-Z_][a-zA-Z0-9_-]*\>"
       \ contained
-      \ contains=cianeWorkflowKw,cianeComment
-      \ fold
+      \ nextgroup=cianeUseAttrs skipwhite skipnl
 
-syntax region cianeWorkflowAttrs matchgroup=cianeParen start="(" end=")"
+syntax region cianeUseAttrs matchgroup=cianeParen start="(" end=")"
       \ contained
       \ contains=cianeAttrKey,cianeEq,cianeBareValue,cianeNumber,cianeComma,cianeComment
       \ fold
@@ -136,6 +136,7 @@ highlight default link cianeStepsKw    Keyword
 highlight default link cianeWorkflowKw Keyword
 
 highlight default link cianeWorkflowDefName Function
+highlight default link cianeUseName      Function
 highlight default link cianeStageName    Function
 highlight default link cianeJobName      Function
 highlight default link cianeTemplateName Function
