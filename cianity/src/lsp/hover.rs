@@ -31,7 +31,16 @@ fn hover_content(token: &SyntaxToken) -> Option<String> {
         }
         SyntaxKind::KwTemplate => Some("**template** — a reusable sequence of steps".into()),
         SyntaxKind::KwUse => Some("**use** — imports external workflows".into()),
-        SyntaxKind::KwWorkflow => Some("**workflow** — an external workflow to import".into()),
+        SyntaxKind::KwWorkflow => {
+            let in_import = token
+                .parent()
+                .is_some_and(|p| p.kind() == SyntaxKind::WorkflowImport);
+            if in_import {
+                Some("**workflow** — an external workflow to import".into())
+            } else {
+                Some("**workflow** — declares a CI workflow".into())
+            }
+        }
         SyntaxKind::Ident => hover_for_ident(token),
         SyntaxKind::BareValue => hover_for_bare_value(token),
         _ => None,
@@ -44,6 +53,7 @@ fn hover_for_ident(token: &SyntaxToken) -> Option<String> {
         SyntaxKind::Name => {
             let owner = parent.parent()?;
             match owner.kind() {
+                SyntaxKind::WorkflowDef => Some(format!("workflow `{}`", token.text())),
                 SyntaxKind::Stage => Some(format!("stage `{}`", token.text())),
                 SyntaxKind::Job => Some(format!("job `{}`", token.text())),
                 SyntaxKind::TemplateDef => Some(format!("template `{}`", token.text())),
@@ -66,6 +76,7 @@ fn hover_for_bare_value(token: &SyntaxToken) -> Option<String> {
         "container" => Some(format!("runs in container `{value}`")),
         "location" => Some(format!("imports workflow from `{value}`")),
         "name" => Some(format!("imported as `{value}`")),
+        "strategy" => Some(format!("workflow strategy: `{value}`")),
         _ => None,
     }
 }
@@ -77,6 +88,7 @@ fn attr_key_doc(key: &str) -> Option<&'static str> {
         "container" => Some("**container** — Docker image to run the job in"),
         "location" => Some("**location** — path or URL of the workflow file"),
         "name" => Some("**name** — alias for the imported workflow"),
+        "strategy" => Some("**strategy** — when this workflow runs"),
         _ => None,
     }
 }

@@ -70,13 +70,35 @@ syntax match cianeStepName "\<[a-zA-Z_][a-zA-Z0-9_-]*\>"
 syntax region cianeShellBlock matchgroup=cianeBrace start="{" end="}"
       \ contained contains=NONE fold
 
+" ── Workflow def (top-level) ─────────────────────────────────────────────────
+" `workflow` is valid both at the top level (workflow def) and inside a use
+" block (workflow import).  A single keyword covers both: nextgroup tries
+" cianeWorkflowDefName first (matches an ident — def case), then falls back to
+" cianeWorkflowAttrs (matches `(` — import case).
+syntax keyword cianeWorkflowKw workflow
+      \ nextgroup=cianeWorkflowDefName,cianeWorkflowAttrs
+      \ skipwhite
+
+syntax match cianeWorkflowDefName "\<[a-zA-Z_][a-zA-Z0-9_-]*\>"
+      \ contained
+      \ nextgroup=cianeWorkflowDefAttrs,cianeWorkflowDefBlock
+      \ skipwhite skipnl
+
+syntax region cianeWorkflowDefAttrs matchgroup=cianeParen start="(" end=")"
+      \ contained nextgroup=cianeWorkflowDefBlock skipwhite skipnl
+      \ contains=cianeAttrKey,cianeEq,cianeBareValue,cianeNumber,cianeComma,cianeComment
+      \ fold
+
+syntax region cianeWorkflowDefBlock matchgroup=cianeBrace start="{" end="}"
+      \ contained
+      \ contains=cianeUseKw,cianeStageKw,cianeTemplateKw,cianeDefaultsKw,cianeComment
+      \ fold
+
 " ── Use block ─────────────────────────────────────────────────────────────────
 syntax region cianeUseBlock matchgroup=cianeBrace start="{" end="}"
       \ contained
       \ contains=cianeWorkflowKw,cianeComment
       \ fold
-
-syntax keyword cianeWorkflowKw workflow nextgroup=cianeWorkflowAttrs skipwhite contained
 
 syntax region cianeWorkflowAttrs matchgroup=cianeParen start="(" end=")"
       \ contained
@@ -113,6 +135,7 @@ highlight default link cianeStepKw     Keyword
 highlight default link cianeStepsKw    Keyword
 highlight default link cianeWorkflowKw Keyword
 
+highlight default link cianeWorkflowDefName Function
 highlight default link cianeStageName    Function
 highlight default link cianeJobName      Function
 highlight default link cianeTemplateName Function

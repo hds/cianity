@@ -54,6 +54,10 @@ pub enum SyntaxKind {
     // ════════════════════════════════════════════════════════════════════════
     /// Top-level file node.
     Root,
+    /// `workflow name (attrs)? { … }` — top-level workflow definition.
+    WorkflowDef,
+    /// The body of a `WorkflowDef` (may or may not be brace-wrapped).
+    WorkflowBody,
     /// `use { ... }` import block.
     UseBlock,
     /// `workflow ( location = …, name = … )` inside a use block.

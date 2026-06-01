@@ -1,7 +1,9 @@
-stage build {
-    job first { echo one }
-}
-
-stage build {
-    job second { echo two }
+workflow ci {
+    stage build {
+        job first { echo one }
+    }
+    
+    stage build {
+        job second { echo two }
+    }
 }

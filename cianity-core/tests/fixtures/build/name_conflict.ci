@@ -1,17 +1,19 @@
-stage build {
-    job compile ( image = rust:1.75 ) { cargo build }
-
-    job check ( image = rust:1.75 ) { cargo clippy }
-}
-
-stage test {
-    job compile (
-        image = rust:latest,
-        dependencies = [build.compile],
-    ) { cargo test }
-
-    job check (
-        image = rust:latest,
-        dependencies = [test.compile],
-    ) { cargo check }
+workflow ci {
+    stage build {
+        job compile ( image = rust:1.75 ) { cargo build }
+    
+        job check ( image = rust:1.75 ) { cargo clippy }
+    }
+    
+    stage test {
+        job compile (
+            image = rust:latest,
+            dependencies = [build.compile],
+        ) { cargo test }
+    
+        job check (
+            image = rust:latest,
+            dependencies = [test.compile],
+        ) { cargo check }
+    }
 }

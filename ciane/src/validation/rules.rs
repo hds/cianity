@@ -3,17 +3,21 @@ use std::collections::HashSet;
 use smol_str::SmolStr;
 
 use crate::{
-    ast::{AstNode, HasAttrList, HasName, Root, Stage},
+    ast::{AstNode, HasAttrList, HasName, Root, Stage, WorkflowBody, WorkflowDef},
     error::{Diagnostic, Severity},
 };
 
+const VALID_STRATEGIES: &[&str] = &[
+    "default_branch_and_reviews",
+    "default_branch",
+    "reviews",
+    "none",
+];
+
 /// Collect all semantic diagnostics from a parsed `Root` node.
 pub(super) fn check_root(root: &Root, diagnostics: &mut Vec<Diagnostic>) {
-    check_duplicate_stage_names(root, diagnostics);
-    check_duplicate_root_template_names(root, diagnostics);
-    let root_template_names: HashSet<SmolStr> = root.templates().filter_map(|t| t.name()).collect();
-    for stage in root.stages() {
-        check_stage(&stage, &root_template_names, diagnostics);
+    for workflow in root.workflow_defs() {
+        check_workflow_def(&workflow, diagnostics);
     }
     for use_block in root.use_blocks() {
         for import in use_block.imports() {
@@ -22,9 +26,45 @@ pub(super) fn check_root(root: &Root, diagnostics: &mut Vec<Diagnostic>) {
     }
 }
 
-fn check_duplicate_stage_names(root: &Root, diagnostics: &mut Vec<Diagnostic>) {
+fn check_workflow_def(workflow: &WorkflowDef, diagnostics: &mut Vec<Diagnostic>) {
+    check_workflow_strategy(workflow, diagnostics);
+    let Some(body) = workflow.body() else {
+        return;
+    };
+    check_duplicate_workflow_stage_names(&body, diagnostics);
+    check_duplicate_workflow_template_names(&body, diagnostics);
+    let root_template_names: HashSet<SmolStr> = body.templates().filter_map(|t| t.name()).collect();
+    for stage in body.stages() {
+        check_stage(&stage, &root_template_names, diagnostics);
+    }
+}
+
+fn check_workflow_strategy(workflow: &WorkflowDef, diagnostics: &mut Vec<Diagnostic>) {
+    let Some(al) = workflow.attr_list() else {
+        return;
+    };
+    for attr in al.attrs() {
+        if attr.key_text().as_deref() != Some("strategy") {
+            continue;
+        }
+        if let Some(value) = attr.value_text()
+            && !VALID_STRATEGIES.contains(&value.as_str())
+        {
+            diagnostics.push(Diagnostic {
+                severity: Severity::Error,
+                message: format!(
+                    "invalid strategy `{value}`; expected one of \
+                     `default_branch_and_reviews`, `default_branch`, `reviews`, or `none`"
+                ),
+                span: span_of(attr.syntax()),
+            });
+        }
+    }
+}
+
+fn check_duplicate_workflow_stage_names(body: &WorkflowBody, diagnostics: &mut Vec<Diagnostic>) {
     let mut seen: HashSet<SmolStr> = HashSet::new();
-    for stage in root.stages() {
+    for stage in body.stages() {
         if let Some(name) = stage.name()
             && !seen.insert(name.clone())
         {
@@ -37,9 +77,9 @@ fn check_duplicate_stage_names(root: &Root, diagnostics: &mut Vec<Diagnostic>) {
     }
 }
 
-fn check_duplicate_root_template_names(root: &Root, diagnostics: &mut Vec<Diagnostic>) {
+fn check_duplicate_workflow_template_names(body: &WorkflowBody, diagnostics: &mut Vec<Diagnostic>) {
     let mut seen: HashSet<SmolStr> = HashSet::new();
-    for tmpl in root.templates() {
+    for tmpl in body.templates() {
         if let Some(name) = tmpl.name()
             && !seen.insert(name.clone())
         {
@@ -64,7 +104,6 @@ fn check_stage(
     let stage_template_names: HashSet<SmolStr> =
         body.templates().filter_map(|t| t.name()).collect();
 
-    // Both stage-local and root-level templates are in scope for `inherit`.
     let all_template_names: HashSet<SmolStr> = stage_template_names
         .iter()
         .chain(root_templates.iter())

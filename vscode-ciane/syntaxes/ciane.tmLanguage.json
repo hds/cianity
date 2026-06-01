@@ -5,8 +5,10 @@
   "fileTypes": ["ciane", "ci"],
   "patterns": [
     { "include": "#comment" },
+    { "include": "#workflow-def" },
     { "include": "#use-block" },
     { "include": "#stage" },
+    { "include": "#template-def" },
     { "include": "#defaults" }
   ],
   "repository": {
@@ -14,6 +16,19 @@
     "comment": {
       "match": "#.*$",
       "name": "comment.line.number-sign.ciane"
+    },
+
+    "workflow-def": {
+      "comment": "workflow name (attrs)? — highlights keyword, name, and optional attr list; ends before { or at EOL so body is handled by top-level patterns",
+      "begin": "\\b(workflow)\\b\\s+([a-zA-Z_][a-zA-Z0-9_-]*)",
+      "end": "(?=\\{)|$",
+      "beginCaptures": {
+        "1": { "name": "keyword.other.ciane" },
+        "2": { "name": "entity.name.function.ciane" }
+      },
+      "patterns": [
+        { "include": "#attr-list" }
+      ]
     },
 
     "use-block": {

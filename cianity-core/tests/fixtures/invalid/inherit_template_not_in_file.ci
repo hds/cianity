@@ -1,12 +1,14 @@
-use {
-    workflow (
-        location = ../shared/templates.ci,
-        name = shared,
-    )
-}
-
-stage test {
-    job unit ( inherit = shared/not_there ) [
-        steps,
-    ]
+workflow ci {
+    use {
+        workflow (
+            location = ../shared/templates.ci,
+            name = shared,
+        )
+    }
+    
+    stage test {
+        job unit ( inherit = shared/not_there ) [
+            steps,
+        ]
+    }
 }

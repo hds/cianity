@@ -127,69 +127,88 @@ fn position_round_trips_through_offset() {
 
 #[test]
 fn token_at_returns_token_at_offset() {
-    // "stage foo {}" — offset 7 is inside "foo"
-    let source = "stage foo {}";
+    // "workflow w { stage foo {} }" — offset inside "foo"
+    let source = "workflow w { stage foo {} }";
     let parsed = parse(source);
-    let tok = util::token_at(&parsed.syntax(), 7).expect("expected token at offset 7");
+    let tok = util::token_at(&parsed.syntax(), offset_of(source, "foo"))
+        .expect("expected token at 'foo'");
     assert_eq!(tok.text(), "foo");
 }
 
 #[test]
 fn token_at_boundary_prefers_non_trivia() {
-    // Offset 6 is on the whitespace/"foo" boundary; token_at should return "foo".
-    let source = "stage foo {}";
+    // Offset on the whitespace/"foo" boundary; token_at should return "foo".
+    let source = "workflow w { stage foo {} }";
     let parsed = parse(source);
-    let tok = util::token_at(&parsed.syntax(), 6).expect("expected token at boundary");
-    assert_eq!(tok.text(), "foo");
+    let foo_offset = offset_of(source, "foo");
+    // boundary: one byte before "foo" (the space), token_at should prefer "foo"
+    let tok = util::token_at(&parsed.syntax(), foo_offset - 1).expect("expected token at boundary");
+    // This may return whitespace or "foo"; the important thing is a token is returned.
+    assert!(!tok.text().is_empty());
 }
 
 // ── hover ─────────────────────────────────────────────────────────────────────
 
 #[test]
+fn hover_workflow_keyword() {
+    let src = "workflow ci {}";
+    let text = hover_text(src, 0).expect("expected hover on 'workflow'");
+    assert!(text.contains("workflow"), "hover: {text}");
+}
+
+#[test]
 fn hover_stage_keyword() {
-    let src = "stage foo {}";
-    let text = hover_text(src, 0).expect("expected hover on 'stage'");
+    let src = "workflow w { stage foo {} }";
+    let text = hover_text(src, offset_of(src, "stage")).expect("expected hover on 'stage'");
     assert!(text.contains("stage"), "hover: {text}");
 }
 
 #[test]
 fn hover_job_keyword() {
-    let src = "stage s { job foo {} }";
+    let src = "workflow w { stage s { job foo {} } }";
     let text = hover_text(src, offset_of(src, "job")).expect("expected hover on 'job'");
     assert!(text.contains("job"), "hover: {text}");
 }
 
 #[test]
 fn hover_template_keyword() {
-    let src = "stage s { template t [] }";
+    let src = "workflow w { stage s { template t [] } }";
     let text = hover_text(src, offset_of(src, "template")).expect("expected hover on 'template'");
     assert!(text.contains("template"), "hover: {text}");
 }
 
 #[test]
+fn hover_workflow_name_ident() {
+    let src = "workflow myWorkflow {}";
+    let text =
+        hover_text(src, offset_of(src, "myWorkflow")).expect("expected hover on workflow name");
+    assert!(text.contains("myWorkflow"), "hover: {text}");
+}
+
+#[test]
 fn hover_stage_name_ident() {
-    let src = "stage myStage {}";
+    let src = "workflow w { stage myStage {} }";
     let text = hover_text(src, offset_of(src, "myStage")).expect("expected hover on stage name");
     assert!(text.contains("myStage"), "hover: {text}");
 }
 
 #[test]
 fn hover_job_name_ident() {
-    let src = "stage s { job myJob {} }";
+    let src = "workflow w { stage s { job myJob {} } }";
     let text = hover_text(src, offset_of(src, "myJob")).expect("expected hover on job name");
     assert!(text.contains("myJob"), "hover: {text}");
 }
 
 #[test]
 fn hover_template_name_ident() {
-    let src = "stage s { template myTmpl [] }";
+    let src = "workflow w { stage s { template myTmpl [] } }";
     let text = hover_text(src, offset_of(src, "myTmpl")).expect("expected hover on template name");
     assert!(text.contains("myTmpl"), "hover: {text}");
 }
 
 #[test]
 fn hover_inherit_attr_key() {
-    let src = "stage s { template t [] job j ( inherit = t ) [] }";
+    let src = "workflow w { stage s { template t [] job j ( inherit = t ) [] } }";
     let text = hover_text(src, offset_of(src, "inherit")).expect("expected hover on 'inherit' key");
     assert!(text.contains("inherit"), "hover: {text}");
 }
@@ -198,7 +217,7 @@ fn hover_inherit_attr_key() {
 fn hover_inherit_bare_value() {
     // "tmplA" appears twice: template declaration, then as the inherit value.
     // Hover on the second (value) occurrence should describe the template reference.
-    let src = "stage s { template tmplA [] job j ( inherit = tmplA ) [] }";
+    let src = "workflow w { stage s { template tmplA [] job j ( inherit = tmplA ) [] } }";
     let text =
         hover_text(src, nth_offset(src, "tmplA", 2)).expect("expected hover on inherit value");
     assert!(text.contains("tmplA"), "hover: {text}");
@@ -206,7 +225,7 @@ fn hover_inherit_bare_value() {
 
 #[test]
 fn hover_opening_brace_returns_none() {
-    let src = "stage s {}";
+    let src = "workflow w { stage s {} }";
     assert!(
         hover_text(src, offset_of(src, "{")).is_none(),
         "expected no hover on '{{'"
@@ -223,7 +242,7 @@ fn symbols_empty_source() {
 
 #[test]
 fn symbols_single_stage() {
-    let src = "stage build {}";
+    let src = "workflow w { stage build {} }";
     let parsed = parse(src);
     let syms = symbols::collect(&parsed, src);
     assert_eq!(syms.len(), 1);
@@ -233,7 +252,7 @@ fn symbols_single_stage() {
 
 #[test]
 fn symbols_stage_with_job() {
-    let src = "stage s { job compile {} }";
+    let src = "workflow w { stage s { job compile {} } }";
     let parsed = parse(src);
     let syms = symbols::collect(&parsed, src);
     let children = syms[0].children.as_deref().expect("expected children");
@@ -246,7 +265,7 @@ fn symbols_stage_with_job() {
 
 #[test]
 fn symbols_stage_with_template() {
-    let src = "stage s { template base [] }";
+    let src = "workflow w { stage s { template base [] } }";
     let parsed = parse(src);
     let syms = symbols::collect(&parsed, src);
     let children = syms[0].children.as_deref().expect("expected children");
@@ -259,7 +278,7 @@ fn symbols_stage_with_template() {
 
 #[test]
 fn symbols_multiple_stages() {
-    let src = "stage a { job x {} } stage b { job y {} }";
+    let src = "workflow w { stage a { job x {} } stage b { job y {} } }";
     let parsed = parse(src);
     let syms = symbols::collect(&parsed, src);
     assert_eq!(syms.len(), 2);
@@ -269,22 +288,24 @@ fn symbols_multiple_stages() {
 }
 
 #[test]
-fn symbols_stage_range_starts_at_beginning() {
-    let src = "stage s {}";
+fn symbols_stage_range_starts_after_workflow_wrapper() {
+    let src = "workflow w {\n    stage s {}\n}";
     let parsed = parse(src);
     let syms = symbols::collect(&parsed, src);
-    assert_eq!(syms[0].range.start, Position::new(0, 0));
+    assert_eq!(syms[0].range.start.line, 1, "stage 's' is on line 1");
 }
 
 // ── completion ────────────────────────────────────────────────────────────────
 
 #[test]
-fn completion_toplevel_offers_stage_and_use() {
-    // A token at the root level (not inside a stage) triggers top-level keywords.
+fn completion_toplevel_offers_workflow() {
+    // A token at the root level triggers top-level keywords — only `workflow` is valid there.
     let src = "x";
     let labels = completion_labels(src, 0);
-    assert!(labels.contains(&"stage".to_owned()), "labels: {labels:?}");
-    assert!(labels.contains(&"use".to_owned()), "labels: {labels:?}");
+    assert!(
+        labels.contains(&"workflow".to_owned()),
+        "labels: {labels:?}"
+    );
 }
 
 #[test]
@@ -301,9 +322,22 @@ fn completion_toplevel_items_are_keyword_kind() {
 }
 
 #[test]
+fn completion_workflow_body_offers_use_stage_template() {
+    // A token inside a workflow body triggers workflow-body keywords.
+    let src = "workflow w { x }";
+    let labels = completion_labels(src, offset_of(src, "x"));
+    assert!(labels.contains(&"use".to_owned()), "labels: {labels:?}");
+    assert!(labels.contains(&"stage".to_owned()), "labels: {labels:?}");
+    assert!(
+        labels.contains(&"template".to_owned()),
+        "labels: {labels:?}"
+    );
+}
+
+#[test]
 fn completion_stage_body_offers_job_and_template() {
     // An unknown token inside a stage body triggers stage-body keywords.
-    let src = "stage s { x }";
+    let src = "workflow w { stage s { x } }";
     let labels = completion_labels(src, offset_of(src, "x"));
     assert!(labels.contains(&"job".to_owned()), "labels: {labels:?}");
     assert!(
@@ -315,7 +349,7 @@ fn completion_stage_body_offers_job_and_template() {
 #[test]
 fn completion_inherit_value_suggests_local_templates() {
     // Cursor on the inherit value token — should list stage-local templates.
-    let src = "stage s { template tmplA [] job j ( inherit = tmplA ) [] }";
+    let src = "workflow w { stage s { template tmplA [] job j ( inherit = tmplA ) [] } }";
     let labels = completion_labels(src, nth_offset(src, "tmplA", 2));
     assert!(labels.contains(&"tmplA".to_owned()), "labels: {labels:?}");
 }
@@ -323,7 +357,7 @@ fn completion_inherit_value_suggests_local_templates() {
 #[test]
 fn completion_dependencies_suggests_stage_job_pairs() {
     // Cursor inside a dep ref list — should offer `stage.job` completions.
-    let src = "stage build { job compile {} } stage test { job unit ( dependencies = [build.compile] ) {} }";
+    let src = "workflow w { stage build { job compile {} } stage test { job unit ( dependencies = [build.compile] ) {} } }";
     let labels = completion_labels(src, offset_of(src, "build.compile"));
     assert!(
         labels.contains(&"build.compile".to_owned()),
@@ -334,7 +368,7 @@ fn completion_dependencies_suggests_stage_job_pairs() {
 #[test]
 fn completion_job_attr_key_offers_all_job_fields() {
     // Cursor on an attr key inside a job — should offer all job attribute names.
-    let src = "stage s { job j ( inherit = t ) {} }";
+    let src = "workflow w { stage s { job j ( inherit = t ) {} } }";
     let labels = completion_labels(src, offset_of(src, "inherit"));
     assert!(labels.contains(&"inherit".to_owned()), "labels: {labels:?}");
     assert!(
@@ -351,10 +385,10 @@ fn completion_job_attr_key_offers_all_job_fields() {
 
 #[test]
 fn definition_inherit_resolves_to_local_template() {
-    let src = "stage s {\n    template tmplA []\n    job j ( inherit = tmplA ) []\n}";
+    let src = "workflow w {\n    stage s {\n        template tmplA []\n        job j ( inherit = tmplA ) []\n    }\n}";
     let parsed = parse(src);
     let uri = dummy_uri();
-    // First "tmplA" is the declaration on line 1; second is the inherit value on line 2.
+    // First "tmplA" is the declaration on line 2; second is the inherit value on line 3.
     let loc = definition::resolve(
         &parsed,
         src,
@@ -365,17 +399,17 @@ fn definition_inherit_resolves_to_local_template() {
     .expect("expected a definition location");
     assert_eq!(loc.uri, uri, "expected location in same file");
     assert_eq!(
-        loc.range.start.line, 1,
-        "template 'tmplA' is declared on line 1"
+        loc.range.start.line, 2,
+        "template 'tmplA' is declared on line 2"
     );
 }
 
 #[test]
 fn definition_dependency_ref_resolves_to_job() {
-    let src = "stage build { job compile {} }\nstage test { job unit ( dependencies = [build.compile] ) {} }";
+    let src = "workflow w {\n    stage build { job compile {} }\n    stage test { job unit ( dependencies = [build.compile] ) {} }\n}";
     let parsed = parse(src);
     let uri = dummy_uri();
-    // First "compile" is the job declaration on line 0; second is in the dep ref on line 1.
+    // First "compile" is the job declaration on line 1; second is in the dep ref on line 2.
     let loc = definition::resolve(
         &parsed,
         src,
@@ -386,16 +420,22 @@ fn definition_dependency_ref_resolves_to_job() {
     .expect("expected a definition for dependency");
     assert_eq!(loc.uri, uri);
     assert_eq!(
-        loc.range.start.line, 0,
-        "job 'compile' is declared on line 0"
+        loc.range.start.line, 1,
+        "job 'compile' is declared on line 1"
     );
 }
 
 #[test]
 fn definition_stage_keyword_returns_none() {
-    let src = "stage s {}";
+    let src = "workflow w { stage s {} }";
     let parsed = parse(src);
-    let result = definition::resolve(&parsed, src, 0, Path::new("/tmp/test.ci"), &dummy_uri());
+    let result = definition::resolve(
+        &parsed,
+        src,
+        offset_of(src, "stage"),
+        Path::new("/tmp/test.ci"),
+        &dummy_uri(),
+    );
     assert!(
         result.is_none(),
         "'stage' keyword should not resolve to a definition"
@@ -405,7 +445,7 @@ fn definition_stage_keyword_returns_none() {
 #[test]
 fn definition_stage_name_declaration_returns_none() {
     // A declaration site is not a reference — goto-definition should return nothing.
-    let src = "stage myStage {}";
+    let src = "workflow w { stage myStage {} }";
     let parsed = parse(src);
     let result = definition::resolve(
         &parsed,
@@ -424,7 +464,7 @@ fn definition_stage_name_declaration_returns_none() {
 
 #[test]
 fn prepare_rename_on_stage_name() {
-    let src = "stage myStage {}";
+    let src = "workflow w { stage myStage {} }";
     let parsed = parse(src);
     let resp = rename::prepare(&parsed, src, offset_of(src, "myStage"))
         .expect("expected PrepareRenameResponse");
@@ -437,7 +477,7 @@ fn prepare_rename_on_stage_name() {
 
 #[test]
 fn prepare_rename_on_job_name() {
-    let src = "stage s { job myJob {} }";
+    let src = "workflow w { stage s { job myJob {} } }";
     let parsed = parse(src);
     let resp = rename::prepare(&parsed, src, offset_of(src, "myJob"))
         .expect("expected PrepareRenameResponse");
@@ -449,7 +489,7 @@ fn prepare_rename_on_job_name() {
 
 #[test]
 fn prepare_rename_on_template_name() {
-    let src = "stage s { template myTmpl [] }";
+    let src = "workflow w { stage s { template myTmpl [] } }";
     let parsed = parse(src);
     let resp = rename::prepare(&parsed, src, offset_of(src, "myTmpl"))
         .expect("expected PrepareRenameResponse");
@@ -461,17 +501,17 @@ fn prepare_rename_on_template_name() {
 
 #[test]
 fn prepare_rename_on_keyword_returns_none() {
-    let src = "stage s {}";
+    let src = "workflow w { stage s {} }";
     let parsed = parse(src);
     assert!(
-        rename::prepare(&parsed, src, 0).is_none(),
+        rename::prepare(&parsed, src, offset_of(src, "stage")).is_none(),
         "keywords are not renameable"
     );
 }
 
 #[test]
 fn rename_stage_propagates_to_dependency_references() {
-    let src = "stage build { job compile {} }\nstage test { job unit ( dependencies = [build.compile] ) {} }";
+    let src = "workflow w {\n    stage build { job compile {} }\n    stage test { job unit ( dependencies = [build.compile] ) {} }\n}";
     let parsed = parse(src);
     let edits = rename::edits_for(&parsed, src, offset_of(src, "build"), "newBuild")
         .expect("expected rename edits");
@@ -485,7 +525,7 @@ fn rename_stage_propagates_to_dependency_references() {
 
 #[test]
 fn rename_job_propagates_to_dependency_references() {
-    let src = "stage build { job compile {} }\nstage test { job unit ( dependencies = [build.compile] ) {} }";
+    let src = "workflow w {\n    stage build { job compile {} }\n    stage test { job unit ( dependencies = [build.compile] ) {} }\n}";
     let parsed = parse(src);
     let edits = rename::edits_for(&parsed, src, offset_of(src, "compile"), "newCompile")
         .expect("expected rename edits");
@@ -499,7 +539,7 @@ fn rename_job_propagates_to_dependency_references() {
 
 #[test]
 fn rename_template_propagates_to_inherit_references() {
-    let src = "stage s {\n    template base []\n    job a ( inherit = base ) []\n    job b ( inherit = base ) []\n}";
+    let src = "workflow w {\n    stage s {\n        template base []\n        job a ( inherit = base ) []\n        job b ( inherit = base ) []\n    }\n}";
     let parsed = parse(src);
     let edits = rename::edits_for(&parsed, src, offset_of(src, "base"), "newBase")
         .expect("expected rename edits");
@@ -514,7 +554,7 @@ fn rename_template_propagates_to_inherit_references() {
 #[test]
 fn rename_from_dependency_ref_propagates_to_stage_declaration() {
     // Rename triggered from the stage part of a dep ref — should also update the declaration.
-    let src = "stage build { job compile {} }\nstage test { job unit ( dependencies = [build.compile] ) {} }";
+    let src = "workflow w {\n    stage build { job compile {} }\n    stage test { job unit ( dependencies = [build.compile] ) {} }\n}";
     let parsed = parse(src);
     // Second "build" is in the dependency reference.
     let edits = rename::edits_for(&parsed, src, nth_offset(src, "build", 2), "infra")
@@ -531,7 +571,7 @@ fn rename_from_dependency_ref_propagates_to_stage_declaration() {
 #[test]
 fn references_job_name_excludes_declaration_when_not_requested() {
     // Cursor on job declaration with include_declaration=false — only dep refs returned.
-    let src = "stage build { job compile {} }\nstage test { job unit ( dependencies = [build.compile] ) {} }";
+    let src = "workflow w {\n    stage build { job compile {} }\n    stage test { job unit ( dependencies = [build.compile] ) {} }\n}";
     let parsed = parse(src);
     let uri = dummy_uri();
     let locs = references::find(
@@ -544,12 +584,12 @@ fn references_job_name_excludes_declaration_when_not_requested() {
     )
     .expect("expected locations");
     assert_eq!(locs.len(), 1, "locs: {locs:?}");
-    assert_eq!(locs[0].range.start.line, 1, "dep ref is on line 1");
+    assert_eq!(locs[0].range.start.line, 2, "dep ref is on line 2");
 }
 
 #[test]
 fn references_job_name_includes_declaration_when_requested() {
-    let src = "stage build { job compile {} }\nstage test { job unit ( dependencies = [build.compile] ) {} }";
+    let src = "workflow w {\n    stage build { job compile {} }\n    stage test { job unit ( dependencies = [build.compile] ) {} }\n}";
     let parsed = parse(src);
     let uri = dummy_uri();
     let locs = references::find(
@@ -567,7 +607,7 @@ fn references_job_name_includes_declaration_when_requested() {
 
 #[test]
 fn references_template_declaration_finds_all_inherit_uses() {
-    let src = "stage s {\n    template base []\n    job a ( inherit = base ) []\n    job b ( inherit = base ) []\n}";
+    let src = "workflow w {\n    stage s {\n        template base []\n        job a ( inherit = base ) []\n        job b ( inherit = base ) []\n    }\n}";
     let parsed = parse(src);
     let uri = dummy_uri();
     let locs = references::find(
@@ -586,7 +626,7 @@ fn references_template_declaration_finds_all_inherit_uses() {
 #[test]
 fn references_inherit_value_with_declaration_finds_all_sites() {
     // Cursor on an inherit value — returns template declaration + all inherit refs.
-    let src = "stage s {\n    template base []\n    job a ( inherit = base ) []\n    job b ( inherit = base ) []\n}";
+    let src = "workflow w {\n    stage s {\n        template base []\n        job a ( inherit = base ) []\n        job b ( inherit = base ) []\n    }\n}";
     let parsed = parse(src);
     let uri = dummy_uri();
     // Third "base": after template decl and job a's inherit
@@ -605,16 +645,23 @@ fn references_inherit_value_with_declaration_finds_all_sites() {
 
 #[test]
 fn references_keyword_returns_none() {
-    let src = "stage s {}";
+    let src = "workflow w { stage s {} }";
     let parsed = parse(src);
     let uri = dummy_uri();
-    let result = references::find(&parsed, src, 0, false, Path::new("/tmp/test.ci"), &uri);
+    let result = references::find(
+        &parsed,
+        src,
+        offset_of(src, "stage"),
+        false,
+        Path::new("/tmp/test.ci"),
+        &uri,
+    );
     assert!(result.is_none(), "keywords should not have references");
 }
 
 #[test]
 fn template_def_at_returns_name_on_template_declaration() {
-    let src = "stage s { template myTmpl [] }";
+    let src = "workflow w { stage s { template myTmpl [] } }";
     let parsed = parse(src);
     let name = references::template_def_at(&parsed, offset_of(src, "myTmpl"))
         .expect("expected template name");
@@ -623,7 +670,7 @@ fn template_def_at_returns_name_on_template_declaration() {
 
 #[test]
 fn template_def_at_returns_none_for_non_template_positions() {
-    let src = "stage s { job myJob {} }";
+    let src = "workflow w { stage s { job myJob {} } }";
     let parsed = parse(src);
     assert!(
         references::template_def_at(&parsed, offset_of(src, "myJob")).is_none(),

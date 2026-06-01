@@ -1,5 +1,7 @@
-stage test {
-    job unit ( inherit = nonexistent/base ) [
-        steps,
-    ]
+workflow ci {
+    stage test {
+        job unit ( inherit = nonexistent/base ) [
+            steps,
+        ]
+    }
 }

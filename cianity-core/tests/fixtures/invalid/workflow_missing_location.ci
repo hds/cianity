@@ -1,7 +1,9 @@
-use {
-    workflow(name = shared)
-}
-
-stage build {
-    job compile { cargo build }
+workflow ci {
+    use {
+        workflow(name = shared)
+    }
+    
+    stage build {
+        job compile { cargo build }
+    }
 }

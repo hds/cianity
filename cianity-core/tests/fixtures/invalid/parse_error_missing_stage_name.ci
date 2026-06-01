@@ -1,3 +1,5 @@
-stage {
-    job compile { cargo build }
+workflow ci {
+    stage {
+        job compile { cargo build }
+    }
 }

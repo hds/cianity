@@ -1,12 +1,14 @@
-use {
-    workflow (
-        location = ../shared/templates.ci,
-        name = shared,
-    )
-}
-
-stage ci {
-    job check ( inherit = shared/extra.integration ) [
-        steps,
-    ]
+workflow ci {
+    use {
+        workflow (
+            location = ../shared/templates.ci,
+            name = shared,
+        )
+    }
+    
+    stage ci {
+        job check ( inherit = shared/extra.integration ) [
+            steps,
+        ]
+    }
 }

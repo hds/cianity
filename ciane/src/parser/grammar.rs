@@ -5,17 +5,50 @@ use super::Parser;
 /// Parse the root of a `ciane` file.
 ///
 /// ```text
-/// root = use_block? stage*
+/// root = workflow_def*
 /// ```
 pub(super) fn root(p: &mut Parser<'_>) {
     p.start_root_node();
 
-    if p.at(SyntaxKind::KwUse) {
-        use_block(p);
+    while !p.at(SyntaxKind::Eof) {
+        if p.at(SyntaxKind::KwWorkflow) {
+            workflow_def(p);
+        } else {
+            p.error_bump("expected `workflow` or end of file");
+        }
     }
 
-    while !p.at(SyntaxKind::Eof) {
+    p.finish_node();
+}
+
+// ─── workflow def ─────────────────────────────────────────────────────────────
+
+fn workflow_def(p: &mut Parser<'_>) {
+    p.start_node(SyntaxKind::WorkflowDef);
+    p.bump(); // `workflow`
+    name(p);
+    if p.at(SyntaxKind::LParen) {
+        attr_list_body(p);
+    }
+    workflow_body(p);
+    p.finish_node();
+}
+
+fn workflow_body(p: &mut Parser<'_>) {
+    p.start_node(SyntaxKind::WorkflowBody);
+    let braced = p.at(SyntaxKind::LBrace);
+    if braced {
+        p.bump(); // `{`
+    }
+    loop {
+        if p.at(SyntaxKind::Eof) {
+            break;
+        }
+        if braced && p.at(SyntaxKind::RBrace) {
+            break;
+        }
         match p.current() {
+            SyntaxKind::KwUse => use_block(p),
             SyntaxKind::KwStage => stage(p),
             SyntaxKind::KwTemplate => template_def(p),
             SyntaxKind::KwDefaults => {
@@ -26,10 +59,12 @@ pub(super) fn root(p: &mut Parser<'_>) {
                 }
                 p.finish_node();
             }
-            _ => p.error_bump("expected `stage`, `template`, or end of file"),
+            _ => p.error_bump("expected `use`, `stage`, `template`, or end of workflow"),
         }
     }
-
+    if braced {
+        p.expect(SyntaxKind::RBrace);
+    }
     p.finish_node();
 }
 

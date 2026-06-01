@@ -1,6 +1,8 @@
-stage build {
-    job compile [
-        steps,
-        step extra { echo done }
-    ]
+workflow ci {
+    stage build {
+        job compile [
+            steps,
+            step extra { echo done }
+        ]
+    }
 }

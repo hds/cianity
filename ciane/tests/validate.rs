@@ -1,7 +1,4 @@
 //! Integration tests for `ciane::validation::validate`.
-//!
-//! Each test parses valid source (no parse errors) and then runs semantic
-//! validation, checking that the expected diagnostics are produced.
 
 use ciane::{
     ast::{AstNode, Root},
@@ -43,18 +40,77 @@ fn assert_diagnostic_count(src: &str, severity: Severity, expected: usize) {
     );
 }
 
+// ── valid: workflow strategy ──────────────────────────────────────────────────
+
+#[test]
+fn valid_strategy_default_branch_and_reviews() {
+    assert_no_diagnostics(
+        r"
+workflow ci (strategy = default_branch_and_reviews) {
+    stage build { job compile { cargo build } }
+}
+",
+    );
+}
+
+#[test]
+fn valid_strategy_default_branch() {
+    assert_no_diagnostics(
+        r"
+workflow ci (strategy = default_branch) {
+    stage build { job compile { cargo build } }
+}
+",
+    );
+}
+
+#[test]
+fn valid_strategy_reviews() {
+    assert_no_diagnostics(
+        r"
+workflow ci (strategy = reviews) {
+    stage build { job compile { cargo build } }
+}
+",
+    );
+}
+
+#[test]
+fn valid_strategy_none() {
+    assert_no_diagnostics(
+        r"
+workflow ci (strategy = none) {
+    stage build { job compile { cargo build } }
+}
+",
+    );
+}
+
+#[test]
+fn valid_no_strategy_attr() {
+    assert_no_diagnostics(
+        r"
+workflow ci {
+    stage build { job compile { cargo build } }
+}
+",
+    );
+}
+
 // ── valid: no diagnostics expected ───────────────────────────────────────────
 
 #[test]
 fn valid_unique_stage_names() {
     assert_no_diagnostics(
         r"
-stage build {
-    job compile { cargo build }
-}
+workflow ci {
+    stage build {
+        job compile { cargo build }
+    }
 
-stage test {
-    job run { cargo test }
+    stage test {
+        job run { cargo test }
+    }
 }
 ",
     );
@@ -64,9 +120,11 @@ stage test {
 fn valid_unique_job_names_in_stage() {
     assert_no_diagnostics(
         r"
-stage build {
-    job compile { cargo build }
-    job lint    { cargo clippy }
+workflow ci {
+    stage build {
+        job compile { cargo build }
+        job lint    { cargo clippy }
+    }
 }
 ",
     );
@@ -74,18 +132,19 @@ stage build {
 
 #[test]
 fn valid_steps_with_inherit() {
-    // `steps` is valid when the job has an `inherit` attribute.
     assert_no_diagnostics(
         r"
-stage test {
-    template base [
-        step setup { echo setup }
-        step run   { cargo test }
-    ]
+workflow ci {
+    stage test {
+        template base [
+            step setup { echo setup }
+            step run   { cargo test }
+        ]
 
-    job full(inherit = base) [
-        steps
-    ]
+        job full(inherit = base) [
+            steps
+        ]
+    }
 }
 ",
     );
@@ -93,17 +152,18 @@ stage test {
 
 #[test]
 fn valid_inherit_existing_template() {
-    // `inherit` naming an actual template in the same stage produces no warning.
     assert_no_diagnostics(
         r"
-stage test {
-    template base [
-        step run { cargo test }
-    ]
+workflow ci {
+    stage test {
+        template base [
+            step run { cargo test }
+        ]
 
-    job smoke(inherit = base) [
-        step run { cargo test -- smoke }
-    ]
+        job smoke(inherit = base) [
+            step run { cargo test -- smoke }
+        ]
+    }
 }
 ",
     );
@@ -111,14 +171,14 @@ stage test {
 
 #[test]
 fn valid_inherit_cross_workflow_ref() {
-    // A cross-workflow reference (`ns/template`) is never warned about, even if
-    // no matching local template exists.
     assert_no_diagnostics(
         r"
-stage test {
-    job full(inherit = upstream/base) [
-        steps
-    ]
+workflow ci {
+    stage test {
+        job full(inherit = upstream/base) [
+            steps
+        ]
+    }
 }
 ",
     );
@@ -128,12 +188,14 @@ stage test {
 fn valid_workflow_import_complete() {
     assert_no_diagnostics(
         r"
-use {
-    workflow(location = ./shared.ci, name = shared)
-}
+workflow ci {
+    use {
+        workflow(location = ./shared.ci, name = shared)
+    }
 
-stage build {
-    job compile { cargo build }
+    stage build {
+        job compile { cargo build }
+    }
 }
 ",
     );
@@ -141,15 +203,16 @@ stage build {
 
 #[test]
 fn valid_same_job_names_across_stages() {
-    // Duplicate names across different stages are not an error.
     assert_no_diagnostics(
         r"
-stage build {
-    job compile { cargo build }
-}
+workflow ci {
+    stage build {
+        job compile { cargo build }
+    }
 
-stage test {
-    job compile { cargo test }
+    stage test {
+        job compile { cargo test }
+    }
 }
 ",
     );
@@ -157,17 +220,18 @@ stage test {
 
 #[test]
 fn valid_inherit_top_level_template() {
-    // A job may inherit from a top-level template without any warning.
     assert_no_diagnostics(
         r"
-template base [
-    step run { cargo test }
-]
-
-stage test {
-    job smoke ( inherit = base ) [
-        step run { cargo test -- smoke }
+workflow ci {
+    template base [
+        step run { cargo test }
     ]
+
+    stage test {
+        job smoke ( inherit = base ) [
+            step run { cargo test -- smoke }
+        ]
+    }
 }
 ",
     );
@@ -175,20 +239,21 @@ stage test {
 
 #[test]
 fn valid_inherit_top_level_template_across_stages() {
-    // Top-level templates are visible to jobs in any stage.
     assert_no_diagnostics(
         r"
-template shared [
-    step build { cargo build }
-    step test { cargo test }
-]
+workflow ci {
+    template shared [
+        step build { cargo build }
+        step test { cargo test }
+    ]
 
-stage a {
-    job job_a ( inherit = shared ) [ steps, ]
-}
+    stage a {
+        job job_a ( inherit = shared ) [ steps, ]
+    }
 
-stage b {
-    job job_b ( inherit = shared ) [ steps, ]
+    stage b {
+        job job_b ( inherit = shared ) [ steps, ]
+    }
 }
 ",
     );
@@ -196,20 +261,20 @@ stage b {
 
 #[test]
 fn valid_stage_template_shadows_root_template() {
-    // A stage-local template with the same name as a root template is valid;
-    // neither a duplicate-name error nor an unknown-template warning is expected.
     assert_no_diagnostics(
         r"
-template base [
-    step run { echo root }
-]
-
-stage test {
+workflow ci {
     template base [
-        step run { cargo test }
+        step run { echo root }
     ]
 
-    job unit ( inherit = base ) [ steps, ]
+    stage test {
+        template base [
+            step run { cargo test }
+        ]
+
+        job unit ( inherit = base ) [ steps, ]
+    }
 }
 ",
     );
@@ -217,18 +282,18 @@ stage test {
 
 #[test]
 fn valid_stage_template_shadows_root_no_warning_for_root_only() {
-    // When a name exists only at the root level (no stage-local template),
-    // `inherit` resolves it without a warning.
     assert_no_diagnostics(
         r"
-template shared [
-    step run { cargo test }
-]
-
-stage test {
-    job unit ( inherit = shared ) [
-        step run { cargo test -- unit }
+workflow ci {
+    template shared [
+        step run { cargo test }
     ]
+
+    stage test {
+        job unit ( inherit = shared ) [
+            step run { cargo test -- unit }
+        ]
+    }
 }
 ",
     );
@@ -236,42 +301,61 @@ stage test {
 
 #[test]
 fn valid_shadowing_does_not_warn_when_both_exist() {
-    // When both a root template and a stage-local template share a name,
-    // the stage-local one wins and no warning is emitted.
     assert_no_diagnostics(
         r"
-template common [
-    step run { echo root }
-]
-
-stage a {
+workflow ci {
     template common [
-        step run { echo stage_a }
+        step run { echo root }
     ]
-    job job_a ( inherit = common ) [ steps, ]
-}
 
-stage b {
-    job job_b ( inherit = common ) [ steps, ]
+    stage a {
+        template common [
+            step run { echo stage_a }
+        ]
+        job job_a ( inherit = common ) [ steps, ]
+    }
+
+    stage b {
+        job job_b ( inherit = common ) [ steps, ]
+    }
 }
 ",
     );
 }
 
+// ── invalid: workflow strategy ────────────────────────────────────────────────
+
+#[test]
+fn error_invalid_strategy() {
+    assert_has_diagnostic(
+        r"
+workflow ci (strategy = weekly) {
+    stage build { job compile { cargo build } }
+}
+",
+        Severity::Error,
+        "invalid strategy `weekly`",
+    );
+}
+
+// ── invalid: expected diagnostics ────────────────────────────────────────────
+
 #[test]
 fn error_duplicate_top_level_template_names() {
     assert_has_diagnostic(
         r"
-template base [
-    step run { cargo test }
-]
+workflow ci {
+    template base [
+        step run { cargo test }
+    ]
 
-template base [
-    step run { cargo build }
-]
+    template base [
+        step run { cargo build }
+    ]
 
-stage build {
-    job compile { cargo build }
+    stage build {
+        job compile { cargo build }
+    }
 }
 ",
         Severity::Error,
@@ -279,18 +363,18 @@ stage build {
     );
 }
 
-// ── invalid: expected diagnostics ────────────────────────────────────────────
-
 #[test]
 fn error_duplicate_stage_names() {
     assert_has_diagnostic(
         r"
-stage build {
-    job compile { cargo build }
-}
+workflow ci {
+    stage build {
+        job compile { cargo build }
+    }
 
-stage build {
-    job run { cargo test }
+    stage build {
+        job run { cargo test }
+    }
 }
 ",
         Severity::Error,
@@ -302,9 +386,11 @@ stage build {
 fn error_duplicate_job_names_in_stage() {
     assert_has_diagnostic(
         r"
-stage build {
-    job compile { cargo build }
-    job compile { cargo build --release }
+workflow ci {
+    stage build {
+        job compile { cargo build }
+        job compile { cargo build --release }
+    }
 }
 ",
         Severity::Error,
@@ -314,15 +400,16 @@ stage build {
 
 #[test]
 fn error_job_and_template_share_name() {
-    // A template whose name matches a job in the same stage is a duplicate.
     assert_has_diagnostic(
         r"
-stage build {
-    job common { cargo build }
+workflow ci {
+    stage build {
+        job common { cargo build }
 
-    template common [
-        step run { cargo build }
-    ]
+        template common [
+            step run { cargo build }
+        ]
+    }
 }
 ",
         Severity::Error,
@@ -332,14 +419,15 @@ stage build {
 
 #[test]
 fn error_steps_without_inherit() {
-    // `steps` requires the job to have an `inherit` attribute.
     assert_has_diagnostic(
         r"
-stage build {
-    job compile [
-        steps,
-        step extra { echo extra }
-    ]
+workflow ci {
+    stage build {
+        job compile [
+            steps,
+            step extra { echo extra }
+        ]
+    }
 }
 ",
         Severity::Error,
@@ -349,14 +437,14 @@ stage build {
 
 #[test]
 fn warning_inherit_references_unknown_template() {
-    // Inheriting from a name that isn't a template in this stage or at the top
-    // level is a warning.
     assert_has_diagnostic(
         r"
-stage build {
-    job compile(inherit = nonexistent) [
-        step run { cargo build }
-    ]
+workflow ci {
+    stage build {
+        job compile(inherit = nonexistent) [
+            step run { cargo build }
+        ]
+    }
 }
 ",
         Severity::Warning,
@@ -366,13 +454,13 @@ stage build {
 
 #[test]
 fn warning_inherit_unknown_template_no_false_positive_for_cross_workflow() {
-    // A slash-qualified ref must not produce a warning even though no matching
-    // local template exists.
     let diags = run(r"
-stage build {
-    job compile(inherit = upstream/base) [
-        step run { cargo build }
-    ]
+workflow ci {
+    stage build {
+        job compile(inherit = upstream/base) [
+            step run { cargo build }
+        ]
+    }
 }
 ");
     let has_unknown_warning = diags.iter().any(|d| {
@@ -388,12 +476,14 @@ stage build {
 fn error_workflow_import_missing_location() {
     assert_has_diagnostic(
         r"
-use {
-    workflow(name = shared)
-}
+workflow ci {
+    use {
+        workflow(name = shared)
+    }
 
-stage build {
-    job compile { cargo build }
+    stage build {
+        job compile { cargo build }
+    }
 }
 ",
         Severity::Error,
@@ -405,12 +495,14 @@ stage build {
 fn error_workflow_import_missing_name() {
     assert_has_diagnostic(
         r"
-use {
-    workflow(location = ./shared.ci)
-}
+workflow ci {
+    use {
+        workflow(location = ./shared.ci)
+    }
 
-stage build {
-    job compile { cargo build }
+    stage build {
+        job compile { cargo build }
+    }
 }
 ",
         Severity::Error,
@@ -420,15 +512,16 @@ stage build {
 
 #[test]
 fn error_workflow_import_missing_both_attrs() {
-    // Both `location` and `name` are required — two errors when both are absent.
     assert_diagnostic_count(
         r"
-use {
-    workflow()
-}
+workflow ci {
+    use {
+        workflow()
+    }
 
-stage build {
-    job compile { cargo build }
+    stage build {
+        job compile { cargo build }
+    }
 }
 ",
         Severity::Error,

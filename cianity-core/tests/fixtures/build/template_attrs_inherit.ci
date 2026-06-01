@@ -1,17 +1,19 @@
-stage build {
-    template base (image = rust:latest) [
-        step compile { cargo build }
-        step test    { cargo test }
-    ]
-
-    job unit ( inherit = base ) [
-        steps,
-    ]
-
-    job integration (
-        inherit = base,
-        image   = rust:nightly,
-    ) [
-        steps,
-    ]
+workflow ci {
+    stage build {
+        template base (image = rust:latest) [
+            step compile { cargo build }
+            step test    { cargo test }
+        ]
+    
+        job unit ( inherit = base ) [
+            steps,
+        ]
+    
+        job integration (
+            inherit = base,
+            image   = rust:nightly,
+        ) [
+            steps,
+        ]
+    }
 }

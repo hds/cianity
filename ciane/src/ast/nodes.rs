@@ -31,6 +31,8 @@ macro_rules! ast_node {
 // ─── node types ──────────────────────────────────────────────────────────────
 
 ast_node!(Root, Root);
+ast_node!(WorkflowDef, WorkflowDef);
+ast_node!(WorkflowBody, WorkflowBody);
 ast_node!(UseBlock, UseBlock);
 ast_node!(WorkflowImport, WorkflowImport);
 ast_node!(AttrList, AttrList);
@@ -49,11 +51,13 @@ ast_node!(StepsKeyword, StepsKeyword);
 
 // ─── impl HasName / HasAttrList ───────────────────────────────────────────────
 
+impl HasName for WorkflowDef {}
 impl HasName for Stage {}
 impl HasName for Job {}
 impl HasName for TemplateDef {}
 impl HasName for Step {}
 
+impl HasAttrList for WorkflowDef {}
 impl HasAttrList for Stage {}
 impl HasAttrList for Job {}
 impl HasAttrList for TemplateDef {}
@@ -62,19 +66,79 @@ impl HasAttrList for WorkflowImport {}
 // ─── Root ─────────────────────────────────────────────────────────────────────
 
 impl Root {
-    /// All `UseBlock` children (usually at most one).
+    /// All `WorkflowDef` children.
+    pub fn workflow_defs(&self) -> impl Iterator<Item = WorkflowDef> + '_ {
+        self.0.children().filter_map(WorkflowDef::cast)
+    }
+
+    /// All `UseBlock` nodes across every workflow in this file.
+    pub fn use_blocks(&self) -> impl Iterator<Item = UseBlock> + '_ {
+        self.workflow_defs().flat_map(|wd| {
+            wd.body()
+                .map_or_else(Vec::new, |b| b.use_blocks().collect::<Vec<_>>())
+        })
+    }
+
+    /// All `Stage` nodes across every workflow in this file.
+    pub fn stages(&self) -> impl Iterator<Item = Stage> + '_ {
+        self.workflow_defs().flat_map(|wd| {
+            wd.body()
+                .map_or_else(Vec::new, |b| b.stages().collect::<Vec<_>>())
+        })
+    }
+
+    /// All top-level `TemplateDef` nodes (outside any stage) across every workflow.
+    pub fn templates(&self) -> impl Iterator<Item = TemplateDef> + '_ {
+        self.workflow_defs().flat_map(|wd| {
+            wd.body()
+                .map_or_else(Vec::new, |b| b.templates().collect::<Vec<_>>())
+        })
+    }
+}
+
+// ─── WorkflowDef ─────────────────────────────────────────────────────────────
+
+impl WorkflowDef {
+    /// The `WorkflowBody` child.
+    #[must_use]
+    pub fn body(&self) -> Option<WorkflowBody> {
+        self.0.children().find_map(WorkflowBody::cast)
+    }
+
+    /// The `strategy` attribute value, if present.
+    #[must_use]
+    pub fn strategy(&self) -> Option<SmolStr> {
+        self.attr_list()?
+            .attrs()
+            .find(|a| a.key_text().as_deref() == Some("strategy"))
+            .and_then(|a| a.value_text())
+    }
+}
+
+// ─── WorkflowBody ─────────────────────────────────────────────────────────────
+
+impl WorkflowBody {
+    /// All `UseBlock` children.
     pub fn use_blocks(&self) -> impl Iterator<Item = UseBlock> + '_ {
         self.0.children().filter_map(UseBlock::cast)
     }
 
-    /// All top-level `Stage` children.
+    /// All `Stage` children.
     pub fn stages(&self) -> impl Iterator<Item = Stage> + '_ {
         self.0.children().filter_map(Stage::cast)
     }
 
-    /// All top-level `TemplateDef` children (outside any stage).
+    /// All `TemplateDef` children (outside any stage).
     pub fn templates(&self) -> impl Iterator<Item = TemplateDef> + '_ {
         self.0.children().filter_map(TemplateDef::cast)
+    }
+
+    /// `true` if this body is wrapped in `{` `}` braces.
+    #[must_use]
+    pub fn is_braced(&self) -> bool {
+        self.0
+            .children_with_tokens()
+            .any(|e| e.kind() == SyntaxKind::LBrace)
     }
 }
 

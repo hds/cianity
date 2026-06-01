@@ -1,3 +1,5 @@
+workflow ci
+
 use {
     workflow (
         location = ./shared.ci,

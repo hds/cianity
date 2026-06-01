@@ -1,10 +1,12 @@
-template common [
-    step setup { echo setup }
-    step run { cargo test }
-]
-
-stage test {
-    job unit ( inherit = common ) [
-        steps,
+workflow ci {
+    template common [
+        step setup { echo setup }
+        step run { cargo test }
     ]
+    
+    stage test {
+        job unit ( inherit = common ) [
+            steps,
+        ]
+    }
 }

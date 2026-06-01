@@ -1,11 +1,13 @@
-template base [
-    step setup { rustup update }
-    step run { cargo test }
-]
-
-stage extra {
-    template integration [
+workflow shared {
+    template base [
         step setup { rustup update }
-        step run { cargo test --test '*' }
+        step run { cargo test }
     ]
+    
+    stage extra {
+        template integration [
+            step setup { rustup update }
+            step run { cargo test --test '*' }
+        ]
+    }
 }

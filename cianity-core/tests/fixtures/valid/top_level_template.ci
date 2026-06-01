@@ -1,10 +1,12 @@
-template base [
-    step setup { echo setup }
-    step run { cargo test }
-]
-
-stage test {
-    job unit ( inherit = base ) [
-        steps,
+workflow ci {
+    template base [
+        step setup { echo setup }
+        step run { cargo test }
     ]
+    
+    stage test {
+        job unit ( inherit = base ) [
+            steps,
+        ]
+    }
 }

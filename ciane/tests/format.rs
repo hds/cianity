@@ -25,66 +25,71 @@ fn check_idempotent(src: &str) {
 
 #[test]
 fn empty_stage() {
-    let src = "stage build { }";
+    let src = "workflow w { stage build { } }";
     let out = format(src);
-    assert_eq!(out, "stage build {\n}\n");
+    assert_eq!(out, "workflow w {\n    stage build {\n    }\n}\n");
     check_idempotent(src);
 }
 
 #[test]
 fn stage_with_inline_job() {
-    let src = "stage build { job compile { cargo build } }";
+    let src = "workflow w { stage build { job compile { cargo build } } }";
     let out = format(src);
-    assert_eq!(out, "stage build {\n    job compile { cargo build }\n}\n");
+    assert_eq!(
+        out,
+        "workflow w {\n    stage build {\n        job compile { cargo build }\n    }\n}\n"
+    );
     check_idempotent(src);
 }
 
 #[test]
 fn stage_with_attr_list() {
-    let src = "stage test(dependencies=[build.compile]){ job run { cargo test } }";
+    let src = "workflow w { stage test(dependencies=[build.compile]){ job run { cargo test } } }";
     let out = format(src);
     assert_eq!(
         out,
-        "stage test ( dependencies = [build.compile] ) {\n    job run { cargo test }\n}\n"
+        "workflow w {\n    stage test ( dependencies = [build.compile] ) {\n        job run { cargo test }\n    }\n}\n"
     );
     check_idempotent(src);
 }
 
 #[test]
 fn use_block() {
-    let src = "use { workflow(location=./a.ci,name=a) }";
+    let src = "workflow w { use { workflow(location=./a.ci,name=a) } }";
     let out = format(src);
     assert_eq!(
         out,
-        "use {\n    workflow (\n        location = ./a.ci,\n        name = a,\n    )\n}\n"
+        "workflow w {\n    use {\n        workflow (\n            location = ./a.ci,\n            name = a,\n        )\n    }\n}\n"
     );
     check_idempotent(src);
 }
 
 #[test]
 fn use_block_then_stage() {
-    let src =
-        "use { workflow(location=./a.ci,name=a) } stage build { job compile { cargo build } }";
+    let src = "workflow w { use { workflow(location=./a.ci,name=a) } stage build { job compile { cargo build } } }";
     let out = format(src);
-    assert!(out.starts_with("use {"), "should start with use block");
-    assert!(out.contains("\n\nstage build"), "blank line before stage");
+    assert!(
+        out.starts_with("workflow w {\n    use {"),
+        "should start with use block"
+    );
+    assert!(
+        out.contains("\n\n    stage build"),
+        "blank line before stage"
+    );
     check_idempotent(src);
 }
 
 #[test]
 fn multiple_stages() {
-    let src = "stage a { job j { echo } } stage b { job k { echo } }";
+    let src = "workflow w { stage a { job j { echo } } stage b { job k { echo } } }";
     let out = format(src);
-    assert!(out.contains("\n\nstage b"), "blank line between stages");
+    assert!(out.contains("\n\n    stage b"), "blank line between stages");
     check_idempotent(src);
 }
 
 #[test]
 fn template_and_steps_job() {
-    let src = r#"stage s {
-    template t [ step a { cmd } step b { cmd2 } ]
-    job j(inherit=t) [ steps ]
-}"#;
+    let src = "workflow w { stage s { template t [ step a { cmd } step b { cmd2 } ] job j(inherit=t) [ steps ] } }";
     let out = format(src);
     assert!(out.contains("template t ["));
     assert!(out.contains("steps,"));
@@ -93,7 +98,7 @@ fn template_and_steps_job() {
 
 #[test]
 fn step_reference() {
-    let src = "stage s { job j(inherit=t) [ step a, step b { run } ] }";
+    let src = "workflow w { stage s { job j(inherit=t) [ step a, step b { run } ] } }";
     let out = format(src);
     assert!(out.contains("step a,"), "bare step ref has trailing comma");
     assert!(
@@ -105,7 +110,7 @@ fn step_reference() {
 
 #[test]
 fn ref_list_attr_value() {
-    let src = "stage s(dependencies=[a.b, c.d]) { job j { echo } }";
+    let src = "workflow w { stage s(dependencies=[a.b, c.d]) { job j { echo } } }";
     let out = format(src);
     assert!(out.contains("[a.b, c.d]"), "ref list preserved");
     check_idempotent(src);
@@ -115,11 +120,11 @@ fn ref_list_attr_value() {
 
 #[test]
 fn top_level_template_only() {
-    let src = "template base [ step run { cargo test } ]";
+    let src = "workflow w { template base [ step run { cargo test } ] }";
     let out = format(src);
     assert!(
-        out.starts_with("template base ["),
-        "should start with template"
+        out.starts_with("workflow w {\n    template base ["),
+        "should start with workflow then template"
     );
     assert!(out.contains("step run { cargo test }"));
     check_idempotent(src);
@@ -127,11 +132,11 @@ fn top_level_template_only() {
 
 #[test]
 fn top_level_template_then_stage() {
-    let src = "template base [ step run { cargo test } ] stage test { job unit { cargo test } }";
+    let src = "workflow w { template base [ step run { cargo test } ] stage test { job unit { cargo test } } }";
     let out = format(src);
-    assert!(out.starts_with("template base ["));
+    assert!(out.starts_with("workflow w {\n    template base ["));
     assert!(
-        out.contains("\n\nstage test"),
+        out.contains("\n\n    stage test"),
         "blank line between template and stage"
     );
     check_idempotent(src);
@@ -139,11 +144,11 @@ fn top_level_template_then_stage() {
 
 #[test]
 fn stage_then_top_level_template() {
-    let src = "stage build { job compile { cargo build } } template post [ step done { echo ok } ]";
+    let src = "workflow w { stage build { job compile { cargo build } } template post [ step done { echo ok } ] }";
     let out = format(src);
-    assert!(out.starts_with("stage build {"));
+    assert!(out.starts_with("workflow w {\n    stage build {"));
     assert!(
-        out.contains("\n\ntemplate post ["),
+        out.contains("\n\n    template post ["),
         "blank line between stage and template"
     );
     check_idempotent(src);
@@ -151,11 +156,11 @@ fn stage_then_top_level_template() {
 
 #[test]
 fn use_block_then_top_level_template_then_stage() {
-    let src = "use { workflow(location=./a.ci,name=a) } template t [ step s { cmd } ] stage b { job j { echo } }";
+    let src = "workflow w { use { workflow(location=./a.ci,name=a) } template t [ step s { cmd } ] stage b { job j { echo } } }";
     let out = format(src);
-    assert!(out.starts_with("use {"));
-    assert!(out.contains("\n\ntemplate t ["));
-    assert!(out.contains("\n\nstage b {"));
+    assert!(out.starts_with("workflow w {\n    use {"));
+    assert!(out.contains("\n\n    template t ["));
+    assert!(out.contains("\n\n    stage b {"));
     check_idempotent(src);
 }
 
@@ -163,9 +168,8 @@ fn use_block_then_top_level_template_then_stage() {
 
 #[test]
 fn defaults_block_returns_error() {
-    let src = "defaults(runner=docker)";
+    let src = "workflow w { defaults(runner=docker) }";
     let result = parse(src);
-    // Defaults parse without errors (the parser accepts the syntax)
     if result.errors().is_empty() {
         let root = Root::cast(result.syntax()).expect("Root node");
         assert_eq!(

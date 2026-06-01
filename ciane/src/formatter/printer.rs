@@ -2,7 +2,7 @@ use crate::{
     ast::{
         AstNode, Attr, AttrList, AttrValue, HasAttrList, HasName, Job, JobBodyInline, JobBodySteps,
         Ref, RefList, Root, Stage, StageBody, Step, StepsKeyword, TemplateDef, UseBlock,
-        WorkflowImport,
+        WorkflowBody, WorkflowDef, WorkflowImport,
     },
     syntax::SyntaxKind,
 };
@@ -25,52 +25,123 @@ impl Printer {
     }
 
     pub(super) fn print_root(mut self, root: &Root) -> Result<String, FormatError> {
-        // Detect `defaults` blocks — bare AttrList nodes under Root.
-        let has_defaults = root
-            .syntax()
-            .children()
-            .any(|n| n.kind() == SyntaxKind::AttrList);
-        if has_defaults {
-            return Err(FormatError::DefaultsBlockUnsupported);
-        }
-
         let mut had_output = false;
 
         for child in root.syntax().children() {
-            match child.kind() {
-                SyntaxKind::UseBlock => {
-                    if let Some(use_block) = UseBlock::cast(child) {
-                        if had_output {
-                            self.push_str("\n\n");
-                        }
-                        self.print_use_block(&use_block);
-                        had_output = true;
-                    }
+            if let Some(wdef) = WorkflowDef::cast(child) {
+                if had_output {
+                    self.push_str("\n\n");
                 }
-                SyntaxKind::Stage => {
-                    if let Some(stage) = Stage::cast(child) {
-                        if had_output {
-                            self.push_str("\n\n");
-                        }
-                        self.print_stage(&stage);
-                        had_output = true;
-                    }
-                }
-                SyntaxKind::TemplateDef => {
-                    if let Some(tmpl) = TemplateDef::cast(child) {
-                        if had_output {
-                            self.push_str("\n\n");
-                        }
-                        self.print_template(&tmpl);
-                        had_output = true;
-                    }
-                }
-                _ => {}
+                self.print_workflow_def(&wdef)?;
+                had_output = true;
             }
         }
 
         self.push('\n');
         Ok(self.output)
+    }
+
+    // ── workflow def ─────────────────────────────────────────────────────────
+
+    fn print_workflow_def(&mut self, wdef: &WorkflowDef) -> Result<(), FormatError> {
+        self.push_str("workflow ");
+        self.push_str(wdef.name().as_deref().unwrap_or(""));
+        if let Some(attrs) = wdef.attr_list() {
+            self.print_attr_list(&attrs);
+        }
+        let Some(body) = wdef.body() else {
+            return Ok(());
+        };
+        if body
+            .syntax()
+            .children()
+            .any(|n| n.kind() == SyntaxKind::AttrList)
+        {
+            return Err(FormatError::DefaultsBlockUnsupported);
+        }
+        if body.is_braced() {
+            self.push_str(" {");
+            self.print_workflow_body_braced(&body);
+            self.push('\n');
+            self.push_indent();
+            self.push_str("}");
+        } else {
+            self.print_workflow_body_unbraced(&body);
+        }
+        Ok(())
+    }
+
+    fn print_workflow_body_braced(&mut self, body: &WorkflowBody) {
+        self.indent += 1;
+        let mut first = true;
+        for child in body.syntax().children() {
+            match child.kind() {
+                SyntaxKind::UseBlock => {
+                    if let Some(use_block) = UseBlock::cast(child) {
+                        if first {
+                            first = false;
+                        } else {
+                            self.push('\n');
+                        }
+                        self.push('\n');
+                        self.push_indent();
+                        self.print_use_block(&use_block);
+                    }
+                }
+                SyntaxKind::Stage => {
+                    if let Some(stage) = Stage::cast(child) {
+                        if first {
+                            first = false;
+                        } else {
+                            self.push('\n');
+                        }
+                        self.push('\n');
+                        self.push_indent();
+                        self.print_stage(&stage);
+                    }
+                }
+                SyntaxKind::TemplateDef => {
+                    if let Some(tmpl) = TemplateDef::cast(child) {
+                        if first {
+                            first = false;
+                        } else {
+                            self.push('\n');
+                        }
+                        self.push('\n');
+                        self.push_indent();
+                        self.print_template(&tmpl);
+                    }
+                }
+                _ => {}
+            }
+        }
+        self.indent -= 1;
+    }
+
+    fn print_workflow_body_unbraced(&mut self, body: &WorkflowBody) {
+        for child in body.syntax().children() {
+            match child.kind() {
+                SyntaxKind::UseBlock => {
+                    if let Some(use_block) = UseBlock::cast(child) {
+                        self.push_str("\n\n");
+                        self.print_use_block(&use_block);
+                    }
+                }
+                SyntaxKind::Stage => {
+                    if let Some(stage) = Stage::cast(child) {
+                        self.push_str("\n\n");
+                        self.print_stage(&stage);
+                    }
+                }
+                SyntaxKind::TemplateDef => {
+                    if let Some(tmpl) = TemplateDef::cast(child) {
+                        self.push_str("\n\n");
+                        self.print_template(&tmpl);
+                    }
+                }
+                _ => {}
+            }
+        }
     }
 
     // ── use block ────────────────────────────────────────────────────────────
@@ -85,6 +156,7 @@ impl Printer {
         }
         self.indent -= 1;
         self.push('\n');
+        self.push_indent();
         self.push_str("}");
     }
 
@@ -108,6 +180,7 @@ impl Printer {
             self.print_stage_body(&body);
         }
         self.push('\n');
+        self.push_indent();
         self.push_str("}");
     }
 

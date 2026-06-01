@@ -166,7 +166,7 @@ fn referenced_files_returns_existing_imports() {
     let root = write(
         &tmp,
         "workflow.ci",
-        "use {\n    workflow ( location = ./shared.ci, name = shared, )\n}\n\nstage build {\n    job compile { cargo build }\n}\n",
+        "workflow ci {\n    use {\n        workflow ( location = ./shared.ci, name = shared, )\n    }\n\n    stage build {\n        job compile { cargo build }\n    }\n}\n",
     );
 
     let refs = workspace::referenced_files(&root).unwrap();
@@ -179,7 +179,7 @@ fn referenced_files_skips_missing_imports() {
     let root = write(
         &tmp,
         "workflow.ci",
-        "use {\n    workflow ( location = ./missing.ci, name = missing, )\n}\n\nstage build {\n    job compile { cargo build }\n}\n",
+        "workflow ci {\n    use {\n        workflow ( location = ./missing.ci, name = missing, )\n    }\n\n    stage build {\n        job compile { cargo build }\n    }\n}\n",
     );
 
     let refs = workspace::referenced_files(&root).unwrap();
@@ -192,7 +192,7 @@ fn referenced_files_empty_for_no_use_block() {
     let root = write(
         &tmp,
         "workflow.ci",
-        "stage build {\n    job compile { cargo build }\n}\n",
+        "workflow ci {\n    stage build {\n        job compile { cargo build }\n    }\n}\n",
     );
 
     let refs = workspace::referenced_files(&root).unwrap();
@@ -206,7 +206,7 @@ fn referenced_files_resolves_paths_relative_to_root_parent() {
     let root = write(
         &tmp,
         "ci/workflow.ci",
-        "use {\n    workflow ( location = ../shared/helpers.ci, name = helpers, )\n}\n\nstage build {\n    job compile { cargo build }\n}\n",
+        "workflow ci {\n    use {\n        workflow ( location = ../shared/helpers.ci, name = helpers, )\n    }\n\n    stage build {\n        job compile { cargo build }\n    }\n}\n",
     );
 
     let refs = workspace::referenced_files(&root).unwrap();

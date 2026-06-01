@@ -1,23 +1,25 @@
-stage build {
-    job build ( image = rockylinux:9 ) {
-        cargo check
-        cargo build
-    }
-}
-
-stage test {
-    template test_setup [
-        step setup { cargo binstall --strategies crate-meta-data cargo-nextest }
-    ]
-
-    job test (
-        inherit = test_setup,
-        image = ubuntu:22.04,
-    ) [
-        step setup,
-        step run {
-            cargo nextest run
-            cargo test --doc
+workflow ci {
+    stage build {
+        job build ( image = rockylinux:9 ) {
+            cargo check
+            cargo build
         }
-    ]
+    }
+    
+    stage test {
+        template test_setup [
+            step setup { cargo binstall --strategies crate-meta-data cargo-nextest }
+        ]
+    
+        job test (
+            inherit = test_setup,
+            image = ubuntu:22.04,
+        ) [
+            step setup,
+            step run {
+                cargo nextest run
+                cargo test --doc
+            }
+        ]
+    }
 }

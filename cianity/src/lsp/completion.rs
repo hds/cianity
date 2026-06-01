@@ -62,6 +62,9 @@ fn completion_for_token(token: &SyntaxToken, parse: &Parse) -> Vec<CompletionIte
             SyntaxKind::StageBody => {
                 return stage_body_keywords();
             }
+            SyntaxKind::WorkflowBody => {
+                return workflow_body_keywords();
+            }
             SyntaxKind::Root => {
                 return toplevel_keywords();
             }
@@ -92,8 +95,25 @@ fn attrvalue_key(attr_value_node: &SyntaxNode) -> Option<String> {
 fn value_completions(key: Option<&str>, node: &SyntaxNode, parse: &Parse) -> Vec<CompletionItem> {
     match key {
         Some("inherit") => inherit_completions(node, parse),
+        Some("strategy") => strategy_completions(),
         _ => Vec::new(),
     }
+}
+
+fn strategy_completions() -> Vec<CompletionItem> {
+    [
+        "default_branch_and_reviews",
+        "default_branch",
+        "reviews",
+        "none",
+    ]
+    .iter()
+    .map(|&s| CompletionItem {
+        label: s.to_owned(),
+        kind: Some(CompletionItemKind::ENUM_MEMBER),
+        ..CompletionItem::default()
+    })
+    .collect()
 }
 
 fn inherit_completions(from_node: &SyntaxNode, parse: &Parse) -> Vec<CompletionItem> {
@@ -114,13 +134,23 @@ fn all_template_completions(parse: &Parse) -> Vec<CompletionItem> {
         return Vec::new();
     };
     let mut items = Vec::new();
-    for stage in root.stages() {
-        let Some(body) = stage.body() else {
+    for wdef in root.workflow_defs() {
+        let Some(body) = wdef.body() else {
             continue;
         };
-        let names: Vec<_> = body.templates().filter_map(|t| t.name()).collect();
-        for name in names {
-            items.push(template_item(name.as_str()));
+        for tmpl in body.templates() {
+            if let Some(name) = tmpl.name() {
+                items.push(template_item(name.as_str()));
+            }
+        }
+        for stage in body.stages() {
+            let Some(sbody) = stage.body() else {
+                continue;
+            };
+            let names: Vec<_> = sbody.templates().filter_map(|t| t.name()).collect();
+            for name in names {
+                items.push(template_item(name.as_str()));
+            }
         }
     }
     items
@@ -155,6 +185,7 @@ fn attr_name_completions(owner: Option<SyntaxKind>) -> Vec<CompletionItem> {
         Some(SyntaxKind::Job) => &["inherit", "dependencies", "container"],
         Some(SyntaxKind::TemplateDef) => &["image", "dependencies"],
         Some(SyntaxKind::WorkflowImport) => &["location", "name"],
+        Some(SyntaxKind::WorkflowDef) => &["strategy"],
         _ => &[],
     };
     names.iter().map(|&n| field_item(n)).collect()
@@ -164,8 +195,16 @@ fn stage_body_keywords() -> Vec<CompletionItem> {
     vec![keyword_item("job"), keyword_item("template")]
 }
 
+fn workflow_body_keywords() -> Vec<CompletionItem> {
+    vec![
+        keyword_item("use"),
+        keyword_item("stage"),
+        keyword_item("template"),
+    ]
+}
+
 fn toplevel_keywords() -> Vec<CompletionItem> {
-    vec![keyword_item("stage"), keyword_item("use")]
+    vec![keyword_item("workflow")]
 }
 
 fn keyword_item(label: &str) -> CompletionItem {

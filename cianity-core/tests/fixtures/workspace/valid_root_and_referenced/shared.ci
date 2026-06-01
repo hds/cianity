@@ -1,3 +1,5 @@
-template compile [
-    step run { cargo build --release }
-]
+workflow shared {
+    template compile [
+        step run { cargo build --release }
+    ]
+}

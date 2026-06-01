@@ -1,3 +1,5 @@
-stage {
-    job build { cargo build }
+workflow ci {
+    stage {
+        job build { cargo build }
+    }
 }
