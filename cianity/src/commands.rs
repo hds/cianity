@@ -16,6 +16,25 @@ pub fn build(
         Target::Github => anyhow::bail!("GitHub Actions target is not yet implemented"),
     };
     let root = workspace::resolve_root(file, workspace)?;
+    let mut had_error = false;
+
+    if let Err(e) = cianity_core::check::run(&root) {
+        eprintln!("error: {e}");
+        had_error = true;
+    }
+
+    let refs = workspace::referenced_files(&root)?;
+    for path in &refs {
+        if let Err(e) = cianity_core::check::run(path) {
+            eprintln!("error: {e}");
+            had_error = true;
+        }
+    }
+
+    if had_error {
+        anyhow::bail!("one or more files had errors");
+    }
+
     let out_path = cianity_core::build::run(&root, core_target, output)?;
     println!("wrote {}", out_path.display());
     Ok(())
