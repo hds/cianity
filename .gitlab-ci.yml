@@ -61,7 +61,7 @@ clippy:
 
 check:
   stage: cianity_check
-  image: "rust:1.96-slim-trixie"
+  image: "rust:1.96-trixie"
   dependencies:
     - build_release
   rules:
@@ -70,3 +70,7 @@ check:
   script:
     - ./target/release/cianity check
     - ./target/release/cianity format --check
+    - |
+      ./target/release/cianity build -t gitlab
+      # TODO: fix this after implementing build --check
+      [ "$(git diff --name-only)" == "" ] || ( echo "error: pipeline doesn't match workflow.ci!"; exit 1 )
