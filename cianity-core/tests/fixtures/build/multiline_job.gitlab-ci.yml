@@ -5,6 +5,7 @@ stages:
 build:
   stage: build
   image: "rockylinux:9"
+  dependencies: []
   script:
     - |
       cargo check
@@ -13,6 +14,7 @@ build:
 test:
   stage: test
   image: "ubuntu:22.04"
+  dependencies: []
   script:
     - cargo binstall --strategies crate-meta-data cargo-nextest
     - |

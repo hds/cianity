@@ -4,10 +4,12 @@ stages:
 
 compile:
   stage: build
+  dependencies: []
   script:
     - cargo build --release
 
 run:
   stage: test
+  dependencies: []
   script:
     - cargo test

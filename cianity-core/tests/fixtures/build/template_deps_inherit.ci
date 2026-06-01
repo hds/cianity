@@ -1,0 +1,22 @@
+workflow ci {
+    stage build {
+        job compile { cargo build }
+    }
+
+    stage test {
+        template needs_build (dependencies = [build.compile]) [
+            step run { cargo test }
+        ]
+
+        job unit ( inherit = needs_build ) [
+            steps,
+        ]
+
+        job integration (
+            inherit = needs_build,
+            dependencies = [build.compile, test.unit],
+        ) [
+            steps,
+        ]
+    }
+}

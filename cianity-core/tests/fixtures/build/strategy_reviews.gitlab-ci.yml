@@ -3,6 +3,7 @@ stages:
 
 compile:
   stage: build
+  dependencies: []
   rules:
     - if: $CI_MERGE_REQUEST_IID
   script:

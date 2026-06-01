@@ -3,6 +3,7 @@ stages:
 
 unit:
   stage: test
+  dependencies: []
   script:
     - rustup update
     - cargo build
@@ -10,6 +11,7 @@ unit:
 
 integration:
   stage: test
+  dependencies: []
   script:
     - rustup update
     - cargo build

@@ -5,30 +5,31 @@ stages:
 compile:
   stage: build
   image: "rust:1.75"
+  dependencies: []
   script:
     - cargo build --release
 
 lint:
   stage: build
   image: "rust:1.75"
-  needs:
-    - job: compile
+  dependencies:
+    - compile
   script:
     - cargo clippy -- -D warnings
 
 unit:
   stage: test
   image: "rust:latest"
-  needs:
-    - job: compile
+  dependencies:
+    - compile
   script:
     - cargo test
 
 integration:
   stage: test
   image: "rust:latest"
-  needs:
-    - job: compile
-    - job: unit
+  dependencies:
+    - compile
+    - unit
   script:
     - cargo test --test integration

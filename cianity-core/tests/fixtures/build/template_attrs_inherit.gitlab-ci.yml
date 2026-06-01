@@ -4,6 +4,7 @@ stages:
 unit:
   stage: build
   image: "rust:latest"
+  dependencies: []
   script:
     - cargo build
     - cargo test
@@ -11,6 +12,7 @@ unit:
 integration:
   stage: build
   image: "rust:nightly"
+  dependencies: []
   script:
     - cargo build
     - cargo test

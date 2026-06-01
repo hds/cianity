@@ -5,15 +5,20 @@ stages:
 compile:
   stage: build
   dependencies: []
-  rules:
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   script:
     - cargo build
 
 unit:
   stage: test
-  dependencies: []
-  rules:
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  dependencies:
+    - compile
+  script:
+    - cargo test
+
+integration:
+  stage: test
+  dependencies:
+    - compile
+    - unit
   script:
     - cargo test

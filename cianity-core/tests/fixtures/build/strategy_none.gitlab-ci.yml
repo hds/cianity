@@ -3,5 +3,6 @@ stages:
 
 compile:
   stage: build
+  dependencies: []
   script:
     - cargo build

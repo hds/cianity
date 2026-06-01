@@ -3,6 +3,7 @@ stages:
 
 check:
   stage: ci
+  dependencies: []
   script:
     - rustup update
     - cargo test --test '*'

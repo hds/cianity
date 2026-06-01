@@ -5,27 +5,29 @@ stages:
 build.compile:
   stage: build
   image: "rust:1.75"
+  dependencies: []
   script:
     - cargo build
 
 build.check:
   stage: build
   image: "rust:1.75"
+  dependencies: []
   script:
     - cargo clippy
 
 test.compile:
   stage: test
   image: "rust:latest"
-  needs:
-    - job: build.compile
+  dependencies:
+    - build.compile
   script:
     - cargo test
 
 test.check:
   stage: test
   image: "rust:latest"
-  needs:
-    - job: test.compile
+  dependencies:
+    - test.compile
   script:
     - cargo check

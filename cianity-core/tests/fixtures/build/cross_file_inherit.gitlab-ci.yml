@@ -3,12 +3,14 @@ stages:
 
 unit:
   stage: test
+  dependencies: []
   script:
     - rustup update
     - cargo test
 
 integration:
   stage: test
+  dependencies: []
   script:
     - rustup update
     - cargo test --test '*'

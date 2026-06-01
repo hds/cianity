@@ -3,6 +3,7 @@ stages:
 
 unit:
   stage: test
+  dependencies: []
   script:
     - echo setup
     - cargo test

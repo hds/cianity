@@ -3,5 +3,6 @@ stages:
 
 unit:
   stage: test
+  dependencies: []
   script:
     - echo stage

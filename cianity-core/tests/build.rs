@@ -18,12 +18,13 @@
 //! | `multiline_job` | multi-line `- \|` block scalar; bare step reference; image |
 //! | `template_and_inherit` | `steps` keyword expansion; step body override; unquoted `'` in script |
 //! | `workflow_import` | `use {}` block handled gracefully; stage-level attr ignored |
-//! | `job_dependencies` | `needs:` section; image; unquoted `--`/`-D` dashes in script |
-//! | `name_conflict` | `stage.job` qualified names when the same job name appears in multiple stages; qualified names in `needs:` |
+//! | `job_dependencies` | `dependencies:` list from job attr; `dependencies: []` for jobs without deps; image; unquoted `--`/`-D` dashes in script |
+//! | `name_conflict` | `stage.job` qualified names when the same job name appears in multiple stages; qualified names in `dependencies:` |
 //! | `cross_file_inherit` | `steps` expansion and step override from a template defined in another file |
 //! | `template_attrs_inherit` | template `image` attr propagates to inheriting jobs; job attr overrides template |
 //! | `top_level_template_inherit` | job inherits from a top-level template defined outside any stage |
 //! | `cross_file_stage_template` | `ns/stage.tmpl` syntax resolves a template inside a named stage in another file |
+//! | `template_deps_inherit` | template `dependencies` attr propagates to inheriting job; job `dependencies` overrides template |
 
 use std::path::{Path, PathBuf};
 
@@ -108,6 +109,11 @@ fn build_stage_template_shadows_root() {
 #[test]
 fn build_cross_file_stage_template() {
     assert_gitlab_snapshot("cross_file_stage_template");
+}
+
+#[test]
+fn build_template_deps_inherit() {
+    assert_gitlab_snapshot("template_deps_inherit");
 }
 
 // ── workflow strategy tests ───────────────────────────────────────────────────

@@ -122,14 +122,12 @@ fn render_job(
         let _ = writeln!(out, "  image: {}", yaml_scalar(image));
     }
 
-    if !job.needs.is_empty() {
-        out.push_str("  needs:\n");
+    if job.needs.is_empty() {
+        out.push_str("  dependencies: []\n");
+    } else {
+        out.push_str("  dependencies:\n");
         for need in &job.needs {
-            let _ = writeln!(
-                out,
-                "    - job: {}",
-                yaml_scalar(&dep_name(need, conflicts))
-            );
+            let _ = writeln!(out, "    - {}", yaml_scalar(&dep_name(need, conflicts)));
         }
     }
 

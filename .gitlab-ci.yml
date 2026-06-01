@@ -6,6 +6,7 @@ stages:
 build_debug:
   stage: build
   image: "rust:1.96-slim-trixie"
+  dependencies: []
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - if: $CI_MERGE_REQUEST_IID
@@ -15,6 +16,7 @@ build_debug:
 test:
   stage: test
   image: "rust:1.96-trixie"
+  dependencies: []
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - if: $CI_MERGE_REQUEST_IID
@@ -25,6 +27,7 @@ test:
 fmt:
   stage: test
   image: "rust:1.96-slim-trixie"
+  dependencies: []
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - if: $CI_MERGE_REQUEST_IID
@@ -35,6 +38,7 @@ fmt:
 clippy:
   stage: test
   image: "rust:1.96-slim-trixie"
+  dependencies: []
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - if: $CI_MERGE_REQUEST_IID
@@ -45,6 +49,7 @@ clippy:
 check:
   stage: cianity_check
   image: "rust:1.96-slim-trixie"
+  dependencies: []
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - if: $CI_MERGE_REQUEST_IID
