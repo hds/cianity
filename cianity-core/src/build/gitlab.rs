@@ -144,6 +144,12 @@ fn render_job(
     conflicts: &HashSet<String>,
     strategy: WorkflowStrategy,
 ) {
+    let dotenv_file = if job.env.is_empty() {
+        None
+    } else {
+        Some(format!("{}.{}.env", job.stage, job.name))
+    };
+
     let _ = writeln!(out, "{}:", job_name(&job.stage, &job.name, conflicts));
     let _ = writeln!(out, "  stage: {}", job.stage);
 
@@ -160,6 +166,20 @@ fn render_job(
         }
     }
 
+    if !job.artifacts.is_empty() || dotenv_file.is_some() {
+        out.push_str("  artifacts:\n");
+        if !job.artifacts.is_empty() {
+            out.push_str("    paths:\n");
+            for path in &job.artifacts {
+                let _ = writeln!(out, "      - {}", yaml_scalar(path));
+            }
+        }
+        if let Some(ref fname) = dotenv_file {
+            out.push_str("    reports:\n");
+            let _ = writeln!(out, "      dotenv: {fname}");
+        }
+    }
+
     let rules = strategy_rules(strategy);
     if !rules.is_empty() {
         out.push_str("  rules:\n");
@@ -169,11 +189,16 @@ fn render_job(
     }
 
     out.push_str("  script:\n");
-    if job.script.is_empty() {
+    if job.script.is_empty() && dotenv_file.is_none() {
         out.push_str("    - \"\"\n");
     } else {
         for cmd in &job.script {
             write_script_item(out, cmd);
+        }
+        if let Some(ref fname) = dotenv_file {
+            for var in &job.env {
+                write_script_item(out, &format!("echo \"{var}=\\\"${var}\\\"\" >> {fname}"));
+            }
         }
     }
 }

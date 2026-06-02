@@ -48,7 +48,7 @@ fn stage_with_attr_list() {
     let out = format(src);
     assert_eq!(
         out,
-        "workflow w {\n    stage test ( dependencies = [build.compile] ) {\n        job run { cargo test }\n    }\n}\n"
+        "workflow w {\n    stage test ( dependencies = [ build.compile ] ) {\n        job run { cargo test }\n    }\n}\n"
     );
     check_idempotent(src);
 }
@@ -109,7 +109,7 @@ fn step_reference() {
 fn ref_list_attr_value() {
     let src = "workflow w { stage s(dependencies=[a.b, c.d]) { job j { echo } } }";
     let out = format(src);
-    assert!(out.contains("[a.b, c.d]"), "ref list preserved");
+    assert!(out.contains("[ a.b, c.d ]"), "ref list preserved");
     check_idempotent(src);
 }
 
@@ -158,6 +158,62 @@ fn use_decl_then_top_level_template_then_stage() {
     assert!(out.starts_with("workflow w {\n    use a"));
     assert!(out.contains("\n\n    template t ["));
     assert!(out.contains("\n\n    stage b {"));
+    check_idempotent(src);
+}
+
+// ── return annotation ─────────────────────────────────────────────────────────
+
+#[test]
+fn job_with_return_annotation_paths() {
+    let src = "workflow w { stage build { job compile { cargo build } -> [dist/, **/*.so] } }";
+    let out = format(src);
+    assert!(
+        out.contains("{ cargo build } -> [ dist/, **/*.so ]"),
+        "return annotation preserved: {out}"
+    );
+    check_idempotent(src);
+}
+
+#[test]
+fn job_with_return_annotation_env() {
+    let src = "workflow w { stage build { job compile { cargo build } -> [$RELEASE, $TARGET] } }";
+    let out = format(src);
+    assert!(
+        out.contains("} -> [ $RELEASE, $TARGET ]"),
+        "env annotation preserved: {out}"
+    );
+    check_idempotent(src);
+}
+
+#[test]
+fn job_with_return_annotation_mixed() {
+    let src = "workflow w { stage build { job compile { cargo build } -> [dist/, $RELEASE] } }";
+    let out = format(src);
+    assert!(
+        out.contains("} -> [ dist/, $RELEASE ]"),
+        "mixed annotation preserved: {out}"
+    );
+    check_idempotent(src);
+}
+
+#[test]
+fn template_with_return_annotation() {
+    let src = "workflow w { stage build { template base [ step build { cargo build } ] -> [dist/] job compile (inherit = base) [ steps, ] -> [target/release/app] } }";
+    let out = format(src);
+    assert!(
+        out.contains("] -> [ dist/ ]"),
+        "template return annotation preserved: {out}"
+    );
+    assert!(
+        out.contains("] -> [ target/release/app ]"),
+        "job return annotation preserved: {out}"
+    );
+    check_idempotent(src);
+}
+
+#[test]
+fn fixture_artifacts_merged_idempotent() {
+    let src = include_str!("../../cianity-core/tests/fixtures/build/artifacts_merged.ci");
     check_idempotent(src);
 }
 

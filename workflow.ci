@@ -1,12 +1,14 @@
 workflow main ( strategy = default_branch_and_reviews )
 
+template rust_slim ( image = rust:1.96-slim-trixie )
+
 stage build {
-    job build_debug ( image = rust:1.96-slim-trixie ) { cargo build --workspace }
+    job build_debug ( inherit = rust_slim ) { cargo build --workspace }
+
+    job build_release ( inherit = rust_slim ) { cargo build --release --workspace } -> [ target/release/cianity ]
 }
 
 stage test {
-    template rust_slim ( image = rust:1.96-slim-trixie )
-
     job test ( image = rust:1.96-trixie ) [
         step install_nextest { curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin }
         step run_tests { cargo nextest run --workspace }
@@ -24,9 +26,11 @@ stage test {
 }
 
 stage cianity_check {
-    job check ( image = rust:1.96-slim-trixie ) [
-        step build { cargo build --release --bin cianity }
-        step check { cargo run --release --bin cianity -- check }
-        step format { cargo run --release --bin cianity -- format --check }
+    job check (
+        inherit = rust_slim,
+        dependencies = [ build.build_release ],
+    ) [
+        step check { ./target/release/cianity check }
+        step format { ./target/release/cianity format --check }
     ]
 }

@@ -51,6 +51,9 @@ pub struct Job {
     /// Fully resolved script lines, with any inherited template steps inlined.
     pub script: Vec<String>,
     pub needs: Vec<JobRef>,
+    pub artifacts: Vec<String>,
+    /// Names of environment variables this job exports to downstream jobs (no `$` prefix).
+    pub env: Vec<String>,
 }
 
 impl Job {
@@ -85,6 +88,8 @@ struct TemplateData {
     steps: Vec<(String, String)>,
     image: Option<String>,
     needs: Vec<JobRef>,
+    artifacts: Vec<String>,
+    env: Vec<String>,
 }
 
 /// Raw template data before inheritance is resolved: own attributes plus
@@ -99,6 +104,8 @@ struct RawTemplateEntry {
 /// - Steps: overlay steps replace same-named base steps; new overlay steps are appended.
 /// - Image: overlay image wins if present, otherwise base image.
 /// - Needs: overlay needs win if non-empty, otherwise base needs.
+/// - Artifacts: base and overlay artifacts are concatenated (both kept).
+/// - Env: overlay env wins if non-empty, otherwise base env.
 fn merge_template_data(base: TemplateData, overlay: TemplateData) -> TemplateData {
     let mut steps = base.steps;
     for (name, shell) in overlay.steps {
@@ -113,11 +120,41 @@ fn merge_template_data(base: TemplateData, overlay: TemplateData) -> TemplateDat
     } else {
         overlay.needs
     };
+    let mut artifacts = base.artifacts;
+    artifacts.extend(overlay.artifacts);
+    let env = if overlay.env.is_empty() {
+        base.env
+    } else {
+        overlay.env
+    };
     TemplateData {
         steps,
         image,
         needs,
+        artifacts,
+        env,
     }
+}
+
+/// Split a return-annotation list into artifact paths and exported env var names.
+///
+/// Items starting with `$` are env var names (the `$` is stripped); all other
+/// items are treated as artifact paths or globs.
+fn split_return_annotation(ra: &ast::ReturnAnnotation) -> (Vec<String>, Vec<String>) {
+    let mut artifacts = Vec::new();
+    let mut env = Vec::new();
+    if let Some(pl) = ra.path_list() {
+        for item in pl.items() {
+            if let Some(text) = item.path_text() {
+                if let Some(name) = text.strip_prefix('$') {
+                    env.push(name.to_string());
+                } else {
+                    artifacts.push(text.to_string());
+                }
+            }
+        }
+    }
+    (artifacts, env)
 }
 
 fn inherit_names_from_attr(attr: &ast::Attr) -> Vec<String> {
@@ -139,6 +176,8 @@ fn raw_template_data_from_ast(tmpl: &ast::TemplateDef) -> (TemplateData, Vec<Str
     let mut image = None;
     let mut needs = Vec::new();
     let mut inherit_names = Vec::new();
+    let mut artifacts = Vec::new();
+    let mut env = Vec::new();
     if let Some(al) = tmpl.attr_list() {
         for attr in al.attrs() {
             match attr.key_text().as_deref() {
@@ -153,11 +192,22 @@ fn raw_template_data_from_ast(tmpl: &ast::TemplateDef) -> (TemplateData, Vec<Str
             }
         }
     }
+    if let Some(ra) = tmpl.return_annotation() {
+        let (ra_artifacts, ra_env) = split_return_annotation(&ra);
+        if !ra_artifacts.is_empty() {
+            artifacts = ra_artifacts;
+        }
+        if !ra_env.is_empty() {
+            env = ra_env;
+        }
+    }
     (
         TemplateData {
             steps,
             image,
             needs,
+            artifacts,
+            env,
         },
         inherit_names,
     )
@@ -260,7 +310,13 @@ pub fn lower(root: &Root) -> Workflow {
 
         for job in body.jobs() {
             let job_name = job.name().map_or_else(String::new, |s| s.to_string());
-            let (mut image, inherit_names, mut needs) = parse_job_attrs(&job);
+            let JobAttrs {
+                mut image,
+                inherit_names,
+                mut needs,
+                mut artifacts,
+                mut env,
+            } = parse_job_attrs(&job);
 
             let mut template_data = TemplateData::default();
             for name in &inherit_names {
@@ -281,6 +337,12 @@ pub fn lower(root: &Root) -> Workflow {
             if needs.is_empty() {
                 needs.clone_from(&template_data.needs);
             }
+            let mut merged_artifacts = template_data.artifacts.clone();
+            merged_artifacts.extend(artifacts);
+            artifacts = merged_artifacts;
+            if env.is_empty() {
+                env.clone_from(&template_data.env);
+            }
 
             let script = job_script(&job, &template_data.steps);
 
@@ -290,6 +352,8 @@ pub fn lower(root: &Root) -> Workflow {
                 image,
                 script,
                 needs,
+                artifacts,
+                env,
             });
         }
 
@@ -333,7 +397,13 @@ pub fn lower_with_path(root: &Root, path: &Path) -> anyhow::Result<Workflow> {
 
         for job in body.jobs() {
             let job_name = job.name().map_or_else(String::new, |s| s.to_string());
-            let (mut image, inherit_names, mut needs) = parse_job_attrs(&job);
+            let JobAttrs {
+                mut image,
+                inherit_names,
+                mut needs,
+                mut artifacts,
+                mut env,
+            } = parse_job_attrs(&job);
 
             let mut template_data = TemplateData::default();
             for name in &inherit_names {
@@ -362,6 +432,12 @@ pub fn lower_with_path(root: &Root, path: &Path) -> anyhow::Result<Workflow> {
             if needs.is_empty() {
                 needs.clone_from(&template_data.needs);
             }
+            let mut merged_artifacts = template_data.artifacts.clone();
+            merged_artifacts.extend(artifacts);
+            artifacts = merged_artifacts;
+            if env.is_empty() {
+                env.clone_from(&template_data.env);
+            }
 
             let script = job_script(&job, &template_data.steps);
 
@@ -371,6 +447,8 @@ pub fn lower_with_path(root: &Root, path: &Path) -> anyhow::Result<Workflow> {
                 image,
                 script,
                 needs,
+                artifacts,
+                env,
             });
         }
 
@@ -381,6 +459,14 @@ pub fn lower_with_path(root: &Root, path: &Path) -> anyhow::Result<Workflow> {
     }
 
     Ok(Workflow { stages, strategy })
+}
+
+struct JobAttrs {
+    image: Option<String>,
+    inherit_names: Vec<String>,
+    needs: Vec<JobRef>,
+    artifacts: Vec<String>,
+    env: Vec<String>,
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -412,10 +498,12 @@ fn collect_local_templates(
     resolve_all(&local, root_resolved)
 }
 
-fn parse_job_attrs(job: &ast::Job) -> (Option<String>, Vec<String>, Vec<JobRef>) {
+fn parse_job_attrs(job: &ast::Job) -> JobAttrs {
     let mut image = None;
     let mut inherit_names = Vec::new();
     let mut needs = Vec::new();
+    let mut artifacts = Vec::new();
+    let mut env = Vec::new();
     if let Some(al) = job.attr_list() {
         for attr in al.attrs() {
             match attr.key_text().as_deref() {
@@ -430,7 +518,22 @@ fn parse_job_attrs(job: &ast::Job) -> (Option<String>, Vec<String>, Vec<JobRef>)
             }
         }
     }
-    (image, inherit_names, needs)
+    if let Some(ra) = job.return_annotation() {
+        let (ra_artifacts, ra_env) = split_return_annotation(&ra);
+        if !ra_artifacts.is_empty() {
+            artifacts = ra_artifacts;
+        }
+        if !ra_env.is_empty() {
+            env = ra_env;
+        }
+    }
+    JobAttrs {
+        image,
+        inherit_names,
+        needs,
+        artifacts,
+        env,
+    }
 }
 
 fn refs_from_attr_value(val: &ast::AttrValue) -> Vec<JobRef> {
@@ -439,7 +542,7 @@ fn refs_from_attr_value(val: &ast::AttrValue) -> Vec<JobRef> {
             rl.refs()
                 .filter_map(|r| {
                     let text = r.text();
-                    let (s, j) = text.split_once('.')?;
+                    let (s, j) = text.trim().split_once('.')?;
                     Some(JobRef {
                         stage: s.to_string(),
                         job: j.to_string(),

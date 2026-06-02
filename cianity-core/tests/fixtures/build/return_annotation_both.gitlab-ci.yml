@@ -1,0 +1,16 @@
+stages:
+  - build
+
+compile:
+  stage: build
+  dependencies: []
+  artifacts:
+    paths:
+      - dist/
+      - target/release/app
+    reports:
+      dotenv: build.compile.env
+  script:
+    - cargo build --release
+    - echo "RELEASE=\"$RELEASE\"" >> build.compile.env
+    - echo "CARGO_TERM_COLOR=\"$CARGO_TERM_COLOR\"" >> build.compile.env

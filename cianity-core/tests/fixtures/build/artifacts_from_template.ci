@@ -1,0 +1,10 @@
+workflow ci {
+    stage build {
+        template base [
+            step build { cargo build --release }
+        ] -> [dist/, target/debug/app]
+        job compile (inherit = base) [
+            steps,
+        ]
+    }
+}

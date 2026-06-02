@@ -1,0 +1,14 @@
+stages:
+  - build
+
+compile:
+  stage: build
+  dependencies: []
+  artifacts:
+    paths:
+      - dist/
+    reports:
+      dotenv: build.compile.env
+  script:
+    - cargo build --release
+    - echo "RELEASE=\"$RELEASE\"" >> build.compile.env

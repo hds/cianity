@@ -13,6 +13,19 @@ build_debug:
   script:
     - cargo build --workspace
 
+build_release:
+  stage: build
+  image: "rust:1.96-slim-trixie"
+  dependencies: []
+  artifacts:
+    paths:
+      - target/release/cianity
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_MERGE_REQUEST_IID
+  script:
+    - cargo build --release --workspace
+
 test:
   stage: test
   image: "rust:1.96-trixie"
@@ -49,11 +62,11 @@ clippy:
 check:
   stage: cianity_check
   image: "rust:1.96-slim-trixie"
-  dependencies: []
+  dependencies:
+    - build_release
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - if: $CI_MERGE_REQUEST_IID
   script:
-    - cargo build --release --bin cianity
-    - cargo run --release --bin cianity -- check
-    - cargo run --release --bin cianity -- format --check
+    - ./target/release/cianity check
+    - ./target/release/cianity format --check

@@ -25,6 +25,13 @@
 //! | `top_level_template_inherit` | job inherits from a top-level template defined outside any stage |
 //! | `cross_file_stage_template` | `ns/stage.tmpl` syntax resolves a template inside a named stage in another file |
 //! | `template_deps_inherit` | template `dependencies` attr propagates to inheriting job; job `dependencies` overrides template |
+//! | `artifacts_basic` | `artifacts` list with globs on a job; paths appear in `artifacts.paths:` |
+//! | `artifacts_from_template` | template return annotation artifacts propagate to inheriting job |
+//! | `artifacts_merged` | template and job both declare artifacts; all paths appear in the output |
+//! | `return_annotation_paths` | `->` syntax for artifact paths |
+//! | `return_annotation_env` | `->` syntax for env vars only; emits `variables:` |
+//! | `return_annotation_both` | `->` syntax for both paths and env vars |
+//! | `return_annotation_template` | `->` on template propagates paths and env to inheriting job |
 
 use std::path::{Path, PathBuf};
 
@@ -146,6 +153,41 @@ fn build_template_inherit() {
 #[test]
 fn build_multi_inherit() {
     assert_gitlab_snapshot("multi_inherit");
+}
+
+#[test]
+fn build_artifacts_basic() {
+    assert_gitlab_snapshot("artifacts_basic");
+}
+
+#[test]
+fn build_artifacts_from_template() {
+    assert_gitlab_snapshot("artifacts_from_template");
+}
+
+#[test]
+fn build_artifacts_merged() {
+    assert_gitlab_snapshot("artifacts_merged");
+}
+
+#[test]
+fn build_return_annotation_paths() {
+    assert_gitlab_snapshot("return_annotation_paths");
+}
+
+#[test]
+fn build_return_annotation_env() {
+    assert_gitlab_snapshot("return_annotation_env");
+}
+
+#[test]
+fn build_return_annotation_both() {
+    assert_gitlab_snapshot("return_annotation_both");
+}
+
+#[test]
+fn build_return_annotation_template() {
+    assert_gitlab_snapshot("return_annotation_template");
 }
 
 // ── error cases ───────────────────────────────────────────────────────────────

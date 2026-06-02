@@ -182,8 +182,7 @@ fn dependency_completions(parse: &Parse) -> Vec<CompletionItem> {
 
 fn attr_name_completions(owner: Option<SyntaxKind>) -> Vec<CompletionItem> {
     let names: &[&str] = match owner {
-        Some(SyntaxKind::Job) => &["image", "inherit", "dependencies"],
-        Some(SyntaxKind::TemplateDef) => &["image", "dependencies"],
+        Some(SyntaxKind::Job | SyntaxKind::TemplateDef) => &["image", "inherit", "dependencies"],
         Some(SyntaxKind::UseDecl) => &["path"],
         Some(SyntaxKind::WorkflowDef) => &["strategy"],
         _ => &[],

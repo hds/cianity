@@ -1,0 +1,5 @@
+workflow ci {
+    stage build {
+        job compile { cargo build --release } -> [dist/, **/*.so]
+    }
+}

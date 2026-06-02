@@ -1,0 +1,12 @@
+stages:
+  - build
+
+compile:
+  stage: build
+  dependencies: []
+  artifacts:
+    paths:
+      - dist/
+      - target/debug/app
+  script:
+    - cargo build --release

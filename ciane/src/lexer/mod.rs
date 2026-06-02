@@ -13,6 +13,11 @@ enum LexMode {
     AttrValue,
     /// Inside the `{ }` body of a step or single-step job: capture raw text.
     Shell,
+    /// A single item inside an `artifacts = [...]` list.
+    /// Captures everything up to the next `,`, `]`, or newline as a `PathValue` token.
+    /// Falls back to Normal mode when a `]` or newline is the first non-whitespace
+    /// character (handles trailing commas and empty lists gracefully).
+    PathItem,
 }
 
 struct Lexer<'src> {
@@ -124,6 +129,9 @@ impl<'src> Lexer<'src> {
             b',' => return Some((SyntaxKind::Comma, self.advance(1))),
             b'/' => return Some((SyntaxKind::Slash, self.advance(1))),
             b'.' => return Some((SyntaxKind::Dot, self.advance(1))),
+            b'-' if self.peek2() == Some(b'>') => {
+                return Some((SyntaxKind::Arrow, self.advance(2)));
+            }
             _ => {}
         }
 
@@ -217,11 +225,68 @@ impl<'src> Lexer<'src> {
         }
     }
 
+    /// Lex one path-item token inside an `artifacts = [...]` list.
+    ///
+    /// Leading horizontal whitespace is emitted as a `Whitespace` token and the
+    /// mode is kept as `PathItem` so that `advance_impl` (which skips trivia) will
+    /// call back and capture the actual value on the next iteration.
+    ///
+    /// If the first non-whitespace character is a list terminator (`]` or newline),
+    /// the function switches back to `Normal` mode and delegates to `next_normal`,
+    /// returning whatever comes next.  This lets trailing commas and empty lists
+    /// work without producing spurious error tokens.
+    fn next_path_item(&mut self) -> Option<(SyntaxKind, &'src str)> {
+        let start = self.pos;
+
+        // Emit leading horizontal whitespace as trivia; stay in PathItem mode so
+        // `advance_impl` loops back and captures the value on the next call.
+        while matches!(self.peek(), Some(b' ' | b'\t')) {
+            self.pos += 1;
+        }
+        if self.pos > start {
+            return Some((SyntaxKind::Whitespace, &self.src[start..self.pos]));
+        }
+
+        // At a terminator with no value: fall back to Normal to lex the `]` or newline.
+        if matches!(self.peek(), Some(b']' | b'\n' | b'\r') | None) {
+            self.mode = LexMode::Normal;
+            return self.next_normal();
+        }
+
+        let value_start = self.pos;
+        while let Some(b) = self.peek() {
+            match b {
+                b',' | b']' | b'\n' | b'\r' => break,
+                _ => {
+                    self.pos += 1;
+                }
+            }
+        }
+
+        // Trim trailing horizontal whitespace from the captured value.
+        while self.pos > value_start
+            && matches!(self.src.as_bytes().get(self.pos - 1), Some(b' ' | b'\t'))
+        {
+            self.pos -= 1;
+        }
+
+        self.mode = LexMode::Normal;
+        let value = &self.src[value_start..self.pos];
+        if value.is_empty() {
+            // Shouldn't happen after the terminator check above, but be safe.
+            self.mode = LexMode::Normal;
+            self.next_normal()
+        } else {
+            Some((SyntaxKind::PathValue, value))
+        }
+    }
+
     fn next_token(&mut self) -> Option<(SyntaxKind, &'src str)> {
         match self.mode {
             LexMode::Normal => self.next_normal(),
             LexMode::AttrValue => Some(self.next_attr_value()),
             LexMode::Shell => self.next_shell(),
+            LexMode::PathItem => self.next_path_item(),
         }
     }
 }
@@ -261,6 +326,15 @@ impl<'src> LexerHandle<'src> {
     pub(crate) fn enter_shell_now(&mut self) {
         self.lexer.mode = LexMode::Shell;
         self.lexer.shell_depth = 0;
+    }
+
+    /// Immediately enter path-item mode.
+    ///
+    /// Use this when a `[` or `,` inside an `artifacts` list has *already been
+    /// emitted* as an `LBracket` / `Comma` token and the parser now needs the
+    /// subsequent [`next_token`](Self::next_token) call to return a `PathValue`.
+    pub(crate) fn enter_path_item_now(&mut self) {
+        self.lexer.mode = LexMode::PathItem;
     }
 
     #[must_use]

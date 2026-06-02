@@ -27,6 +27,7 @@ pub enum SyntaxKind {
     Comma,
     Slash,
     Dot,
+    Arrow,
 
     // ── Literals / identifiers ───────────────────────────────────────────────
     /// Identifiers and item names.
@@ -39,6 +40,10 @@ pub enum SyntaxKind {
     /// Raw shell text captured inside `{ }` of a step or inline job.
     /// The outer braces are emitted as separate `LBrace` / `RBrace` tokens.
     ShellBody,
+    /// A single path or glob captured inside an `artifacts = [...]` list.
+    /// Lexed by the `PathItem` lexer mode; may contain any characters except
+    /// `,`, `]`, and newlines (e.g. `dist/`, `**/*.so`, `target/debug/app`).
+    PathValue,
 
     // ── Trivia ───────────────────────────────────────────────────────────────
     Whitespace,
@@ -70,6 +75,10 @@ pub enum SyntaxKind {
     RefList,
     /// A dotted or slashed reference, e.g. `build.build_debug` or `ns/template`.
     Ref,
+    /// `[ path, glob ]` — list of file paths or globs in an `artifacts` attribute.
+    PathList,
+    /// A single entry in a `PathList`.
+    PathItem,
     /// `stage name (attrs) { body }`.
     Stage,
     /// `{ jobs and templates }` — the body of a stage.
@@ -90,6 +99,9 @@ pub enum SyntaxKind {
     StepsKeyword,
     /// Wrapper node holding the `Ident` token for an item's name.
     Name,
+    /// `-> [path_or_$var, …]` — optional return annotation after a job or template body.
+    /// Items starting with `$` are env var names to export; others are artifact paths.
+    ReturnAnnotation,
     /// Error-recovery node wrapping skipped/unexpected tokens.
     ErrorNode,
 }

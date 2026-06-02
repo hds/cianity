@@ -1,0 +1,12 @@
+stages:
+  - build
+
+compile:
+  stage: build
+  dependencies: []
+  artifacts:
+    paths:
+      - dist/
+      - "**/*.so"
+  script:
+    - cargo build --release

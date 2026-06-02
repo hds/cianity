@@ -66,6 +66,10 @@ pub(super) struct Parser<'src> {
     /// When `true`, the next `LBrace` emitted by `bump` will immediately
     /// switch the lexer to shell mode so the following token is `ShellBody`.
     pending_shell: bool,
+    /// When `true`, the next `LBracket` or `Comma` emitted by `bump` will
+    /// switch the lexer to path-item mode so the following token is `PathValue`.
+    /// Cleared after any `bump` call, whether or not it triggered the mode change.
+    pending_path_item: bool,
 }
 
 impl<'src> Parser<'src> {
@@ -81,6 +85,7 @@ impl<'src> Parser<'src> {
             builder: GreenNodeBuilder::new(),
             errors: Vec::new(),
             pending_shell: false,
+            pending_path_item: false,
         }
     }
 
@@ -133,6 +138,12 @@ impl<'src> Parser<'src> {
             if self.pending_shell && kind == SyntaxKind::LBrace {
                 self.lexer.enter_shell_now();
                 self.pending_shell = false;
+            }
+            if self.pending_path_item {
+                if matches!(kind, SyntaxKind::LBracket | SyntaxKind::Comma) {
+                    self.lexer.enter_path_item_now();
+                }
+                self.pending_path_item = false;
             }
         }
         let (next, trivia) = Self::advance_impl(&mut self.lexer);
@@ -210,6 +221,20 @@ impl<'src> Parser<'src> {
     /// `LBrace` token has been emitted.
     pub(super) fn signal_shell(&mut self) {
         self.pending_shell = true;
+    }
+
+    /// Signal that the next `[` or `,` token will open a path-item context.
+    ///
+    /// The lexer will enter `PathItem` mode immediately after emitting that
+    /// token, so the very next [`next_token`](crate::lexer::LexerHandle::next_token)
+    /// call returns a `PathValue`.  The flag is cleared after any `bump` call.
+    pub(super) fn signal_path_item(&mut self) {
+        self.pending_path_item = true;
+    }
+
+    /// The raw text of the current (pre-fetched) token, or `""` at EOF.
+    pub(super) fn current_text(&self) -> &str {
+        self.current.map_or("", |(_, text)| text)
     }
 
     /// Record a parse error at the current position without consuming any token.

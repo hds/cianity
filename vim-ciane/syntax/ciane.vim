@@ -61,6 +61,7 @@ syntax region cianeTemplateAttrs matchgroup=cianeParen start="(" end=")"
 syntax region cianeBracketList matchgroup=cianeBracket start="\[" end="\]"
       \ contained
       \ contains=cianeStepKw,cianeStepsKw,cianeRef,cianeRefSep,cianeComma,cianeComment,cianeShellBlock
+      \ nextgroup=cianeArrow skipwhite skipnl
       \ fold
 
 " ── Step ──────────────────────────────────────────────────────────────────────
@@ -74,6 +75,7 @@ syntax match cianeStepName "\<[a-zA-Z_][a-zA-Z0-9_-]*\>"
 " ── Shell block: job inline body and step body — nothing highlighted inside ───
 syntax region cianeShellBlock matchgroup=cianeBrace start="{" end="}"
       \ contained contains=NONE fold
+      \ nextgroup=cianeArrow skipwhite skipnl
 
 " ── Workflow def (top-level) ─────────────────────────────────────────────────
 syntax keyword cianeWorkflowKw workflow
@@ -110,6 +112,16 @@ syntax region cianeDefaultsAttrs matchgroup=cianeParen start="(" end=")"
       \ contained
       \ contains=cianeAttrKey,cianeEq,cianeBareValue,cianeNumber,cianeComma,cianeComment
       \ fold
+
+" ── Return annotation: -> [ paths, $VARS ] ───────────────────────────────────
+syntax match  cianeArrow "->" contained nextgroup=cianeReturnList skipwhite skipnl
+
+syntax region cianeReturnList matchgroup=cianeBracket start="\[" end="\]"
+      \ contained
+      \ contains=cianeEnvVar,cianeReturnPath,cianeComma,cianeComment
+
+syntax match cianeEnvVar    "\$[A-Za-z_][A-Za-z0-9_]*" contained
+syntax match cianeReturnPath "[^ \t\n\r,\]$]\+"         contained
 
 " ── Attribute elements ────────────────────────────────────────────────────────
 syntax match cianeEq        "="                           contained
@@ -154,6 +166,9 @@ highlight default link cianeBracket    Delimiter
 highlight default link cianeBrace      Delimiter
 highlight default link cianeComment    Comment
 highlight default link cianeTodo       Todo
+highlight default link cianeArrow      Operator
+highlight default link cianeEnvVar     Identifier
+highlight default link cianeReturnPath String
 
 let b:current_syntax = "ciane"
 

@@ -39,6 +39,9 @@ ast_node!(Attr, Attr);
 ast_node!(AttrValue, AttrValue);
 ast_node!(RefList, RefList);
 ast_node!(Ref, Ref);
+ast_node!(PathList, PathList);
+ast_node!(PathItem, PathItem);
+ast_node!(ReturnAnnotation, ReturnAnnotation);
 ast_node!(Stage, Stage);
 ast_node!(StageBody, StageBody);
 ast_node!(Job, Job);
@@ -222,6 +225,12 @@ impl AttrValue {
         self.0.children().find_map(RefList::cast)
     }
 
+    /// The `PathList` child, if this is an artifacts list value.
+    #[must_use]
+    pub fn path_list(&self) -> Option<PathList> {
+        self.0.children().find_map(PathList::cast)
+    }
+
     /// The `BareValue` token text, if this is a scalar value.
     #[must_use]
     pub fn bare_text(&self) -> Option<SmolStr> {
@@ -248,6 +257,39 @@ impl Ref {
     #[must_use]
     pub fn text(&self) -> String {
         self.0.text().to_string()
+    }
+}
+
+// ─── PathList ─────────────────────────────────────────────────────────────────
+
+impl PathList {
+    /// All `PathItem` children.
+    pub fn items(&self) -> impl Iterator<Item = PathItem> + '_ {
+        self.0.children().filter_map(PathItem::cast)
+    }
+}
+
+// ─── PathItem ─────────────────────────────────────────────────────────────────
+
+impl PathItem {
+    /// The raw path/glob text of this item.
+    #[must_use]
+    pub fn path_text(&self) -> Option<SmolStr> {
+        self.0
+            .children_with_tokens()
+            .find_map(|e| e.into_token().filter(|t| t.kind() == SyntaxKind::PathValue))
+            .map(|t| t.text().into())
+    }
+}
+
+// ─── ReturnAnnotation ─────────────────────────────────────────────────────────
+
+impl ReturnAnnotation {
+    /// The mixed path/env-var list (`[dist/, $VAR, …]`), if present.
+    /// Items starting with `$` are env var names to export; others are artifact paths.
+    #[must_use]
+    pub fn path_list(&self) -> Option<PathList> {
+        self.0.children().find_map(PathList::cast)
     }
 }
 
@@ -288,6 +330,12 @@ impl Job {
     #[must_use]
     pub fn steps_body(&self) -> Option<JobBodySteps> {
         self.0.children().find_map(JobBodySteps::cast)
+    }
+
+    /// The `-> paths env` return annotation, if present.
+    #[must_use]
+    pub fn return_annotation(&self) -> Option<ReturnAnnotation> {
+        self.0.children().find_map(ReturnAnnotation::cast)
     }
 }
 
@@ -344,5 +392,11 @@ impl TemplateDef {
     #[must_use]
     pub fn body(&self) -> Option<JobBodySteps> {
         self.0.children().find_map(JobBodySteps::cast)
+    }
+
+    /// The `-> paths env` return annotation, if present.
+    #[must_use]
+    pub fn return_annotation(&self) -> Option<ReturnAnnotation> {
+        self.0.children().find_map(ReturnAnnotation::cast)
     }
 }

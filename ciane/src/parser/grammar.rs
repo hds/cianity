@@ -100,21 +100,51 @@ fn attr_list_body(p: &mut Parser<'_>) {
 
 fn attr(p: &mut Parser<'_>) {
     p.start_node(SyntaxKind::Attr);
+    let is_path_attr = p.current_text() == "artifacts";
     p.bump(); // attribute name
     p.expect(SyntaxKind::Eq);
-    attr_value(p);
+    attr_value(p, is_path_attr);
     p.eat_optional(SyntaxKind::Comma);
     p.finish_node();
 }
 
-fn attr_value(p: &mut Parser<'_>) {
+fn attr_value(p: &mut Parser<'_>, use_path_list: bool) {
     p.start_node(SyntaxKind::AttrValue);
-    if p.at(SyntaxKind::LBracket) {
+    if use_path_list && p.at(SyntaxKind::LBracket) {
+        path_list(p);
+    } else if p.at(SyntaxKind::LBracket) {
         ref_list(p);
     } else if p.at(SyntaxKind::BareValue) {
         p.bump();
     } else {
         p.error("expected attribute value");
+    }
+    p.finish_node();
+}
+
+fn path_list(p: &mut Parser<'_>) {
+    p.start_node(SyntaxKind::PathList);
+    p.signal_path_item();
+    p.expect(SyntaxKind::LBracket);
+    while !p.at(SyntaxKind::RBracket) && !p.at(SyntaxKind::Eof) {
+        if p.at(SyntaxKind::PathValue) {
+            path_item_node(p);
+            p.signal_path_item();
+            p.eat_optional(SyntaxKind::Comma);
+        } else {
+            p.error_bump("expected path in artifacts list");
+        }
+    }
+    p.expect(SyntaxKind::RBracket);
+    p.finish_node();
+}
+
+fn path_item_node(p: &mut Parser<'_>) {
+    p.start_node(SyntaxKind::PathItem);
+    if p.at(SyntaxKind::PathValue) {
+        p.bump();
+    } else {
+        p.error("expected path value");
     }
     p.finish_node();
 }
@@ -198,6 +228,9 @@ fn job(p: &mut Parser<'_>) {
         SyntaxKind::LBracket => job_body_steps(p),
         _ => p.error_bump("expected `{` or `[` for job body"),
     }
+    if p.at(SyntaxKind::Arrow) {
+        return_annotation(p);
+    }
     p.finish_node();
 }
 
@@ -210,6 +243,9 @@ fn template_def(p: &mut Parser<'_>) {
     }
     if p.at(SyntaxKind::LBracket) {
         job_body_steps(p);
+    }
+    if p.at(SyntaxKind::Arrow) {
+        return_annotation(p);
     }
     p.finish_node();
 }
@@ -284,6 +320,17 @@ fn steps_keyword(p: &mut Parser<'_>) {
     p.start_node(SyntaxKind::StepsKeyword);
     p.bump(); // `steps`
     p.eat_optional(SyntaxKind::Comma);
+    p.finish_node();
+}
+
+// ─── return annotation ───────────────────────────────────────────────────────
+
+fn return_annotation(p: &mut Parser<'_>) {
+    p.start_node(SyntaxKind::ReturnAnnotation);
+    p.bump(); // `->`
+    if p.at(SyntaxKind::LBracket) {
+        path_list(p);
+    }
     p.finish_node();
 }
 

@@ -1,8 +1,8 @@
 use crate::{
     ast::{
         AstNode, Attr, AttrList, AttrValue, HasAttrList, HasName, Job, JobBodyInline, JobBodySteps,
-        Ref, RefList, Root, Stage, StageBody, Step, StepsKeyword, TemplateDef, UseDecl,
-        WorkflowBody, WorkflowDef,
+        PathList, Ref, RefList, ReturnAnnotation, Root, Stage, StageBody, Step, StepsKeyword,
+        TemplateDef, UseDecl, WorkflowBody, WorkflowDef,
     },
     syntax::SyntaxKind,
 };
@@ -221,6 +221,9 @@ impl Printer {
             self.push(' ');
             self.print_job_body_steps(&body);
         }
+        if let Some(ra) = job.return_annotation() {
+            self.print_return_annotation(&ra);
+        }
     }
 
     fn print_template(&mut self, tmpl: &TemplateDef) {
@@ -232,6 +235,32 @@ impl Printer {
         if let Some(body) = tmpl.body() {
             self.push(' ');
             self.print_job_body_steps(&body);
+        }
+        if let Some(ra) = tmpl.return_annotation() {
+            self.print_return_annotation(&ra);
+        }
+    }
+
+    fn print_return_annotation(&mut self, ra: &ReturnAnnotation) {
+        self.push_str(" -> ");
+        if let Some(pl) = ra.path_list() {
+            self.push_str("[ ");
+            self.print_path_list_items(&pl);
+            self.push_str(" ]");
+        } else {
+            self.push_str("[]");
+        }
+    }
+
+    fn print_path_list_items(&mut self, pl: &PathList) {
+        let mut first = true;
+        for item in pl.items() {
+            if first {
+                first = false;
+            } else {
+                self.push_str(", ");
+            }
+            self.push_str(item.path_text().as_deref().unwrap_or(""));
         }
     }
 
@@ -377,9 +406,14 @@ impl Printer {
     }
 
     fn print_ref_list(&mut self, list: &RefList) {
-        self.push('[');
+        let mut refs = list.refs().peekable();
+        if refs.peek().is_none() {
+            self.push_str("[]");
+            return;
+        }
+        self.push_str("[ ");
         let mut first = true;
-        for r in list.refs() {
+        for r in refs {
             if first {
                 first = false;
             } else {
@@ -387,11 +421,11 @@ impl Printer {
             }
             self.print_ref(&r);
         }
-        self.push(']');
+        self.push_str(" ]");
     }
 
     fn print_ref(&mut self, r: &Ref) {
-        self.push_str(&r.text());
+        self.push_str(r.text().trim());
     }
 
     // ── output helpers ───────────────────────────────────────────────────────
