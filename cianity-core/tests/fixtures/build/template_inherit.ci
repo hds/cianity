@@ -1,0 +1,16 @@
+workflow ci {
+    stage build {
+        template base [
+            step setup { rustup update }
+            step build { cargo build }
+        ]
+
+        template extended (inherit = base) [
+            step test { cargo test }
+        ]
+
+        job compile (inherit = extended) [
+            steps,
+        ]
+    }
+}

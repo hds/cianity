@@ -3,7 +3,10 @@ use std::collections::HashSet;
 use smol_str::SmolStr;
 
 use crate::{
-    ast::{AstNode, HasAttrList, HasName, Root, Stage, UseDecl, WorkflowBody, WorkflowDef},
+    ast::{
+        AstNode, Attr, HasAttrList, HasName, Root, Stage, TemplateDef, UseDecl, WorkflowBody,
+        WorkflowDef,
+    },
     error::{Diagnostic, Severity},
 };
 
@@ -17,7 +20,7 @@ const VALID_STRATEGIES: &[&str] = &[
 const VALID_WORKFLOW_ATTRS: &[&str] = &["strategy"];
 const VALID_STAGE_ATTRS: &[&str] = &["dependencies"];
 const VALID_JOB_ATTRS: &[&str] = &["image", "inherit", "dependencies"];
-const VALID_TEMPLATE_ATTRS: &[&str] = &["image", "dependencies"];
+const VALID_TEMPLATE_ATTRS: &[&str] = &["image", "inherit", "dependencies"];
 const VALID_USE_ATTRS: &[&str] = &["path"];
 
 fn check_unknown_attrs<N: HasAttrList>(
@@ -50,6 +53,18 @@ fn check_unknown_attrs<N: HasAttrList>(
     }
 }
 
+fn inherit_names_from_attr(attr: &Attr) -> Vec<SmolStr> {
+    attr.value_text().map_or_else(
+        || {
+            attr.value()
+                .and_then(|av| av.ref_list())
+                .map(|rl| rl.refs().map(|r| SmolStr::new(r.text())).collect())
+                .unwrap_or_default()
+        },
+        |v| vec![v],
+    )
+}
+
 /// Collect all semantic diagnostics from a parsed `Root` node.
 pub(super) fn check_root(root: &Root, diagnostics: &mut Vec<Diagnostic>) {
     for workflow in root.workflow_defs() {
@@ -71,6 +86,7 @@ fn check_workflow_def(workflow: &WorkflowDef, diagnostics: &mut Vec<Diagnostic>)
     let root_template_names: HashSet<SmolStr> = body.templates().filter_map(|t| t.name()).collect();
     for tmpl in body.templates() {
         check_unknown_attrs(&tmpl, "template", VALID_TEMPLATE_ATTRS, diagnostics);
+        check_template_inherit(&tmpl, &root_template_names, diagnostics);
     }
     for stage in body.stages() {
         check_stage(&stage, &root_template_names, diagnostics);
@@ -175,6 +191,32 @@ fn check_stage(
             });
         }
         check_unknown_attrs(&tmpl, "template", VALID_TEMPLATE_ATTRS, diagnostics);
+        check_template_inherit(&tmpl, &all_template_names, diagnostics);
+    }
+}
+
+fn check_template_inherit(
+    tmpl: &TemplateDef,
+    template_names: &HashSet<SmolStr>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let Some(al) = tmpl.attr_list() else { return };
+    for attr in al.attrs() {
+        if attr.key_text().as_deref() != Some("inherit") {
+            continue;
+        }
+        for name in inherit_names_from_attr(&attr) {
+            if !name.contains('/') && !template_names.contains(&name) {
+                diagnostics.push(Diagnostic {
+                    severity: Severity::Warning,
+                    message: format!(
+                        "template inherits from `{name}`, but no template with that name \
+                         is defined in this scope"
+                    ),
+                    span: span_of(attr.syntax()),
+                });
+            }
+        }
     }
 }
 
@@ -197,18 +239,17 @@ fn check_job_steps(
             if attr.key_text().as_deref() != Some("inherit") {
                 continue;
             }
-            if let Some(value) = attr.value_text()
-                && !value.contains('/')
-                && !template_names.contains(value.as_str())
-            {
-                diagnostics.push(Diagnostic {
-                    severity: Severity::Warning,
-                    message: format!(
-                        "job inherits from `{value}`, but no template with that name \
-                         is defined in this stage or at the top level"
-                    ),
-                    span: span_of(attr.syntax()),
-                });
+            for name in inherit_names_from_attr(&attr) {
+                if !name.contains('/') && !template_names.contains(&name) {
+                    diagnostics.push(Diagnostic {
+                        severity: Severity::Warning,
+                        message: format!(
+                            "job inherits from `{name}`, but no template with that name \
+                             is defined in this stage or at the top level"
+                        ),
+                        span: span_of(attr.syntax()),
+                    });
+                }
             }
         }
     }

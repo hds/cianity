@@ -573,6 +573,153 @@ workflow ci {
     );
 }
 
+// ── valid: template inherit ───────────────────────────────────────────────────
+
+#[test]
+fn valid_template_inherit_scalar() {
+    assert_no_diagnostics(
+        r"
+workflow ci {
+    stage build {
+        template base [
+            step run { cargo build }
+        ]
+
+        template extended (inherit = base) [
+            step test { cargo test }
+        ]
+
+        job compile (inherit = extended) [ steps, ]
+    }
+}
+",
+    );
+}
+
+#[test]
+fn valid_template_inherit_list() {
+    assert_no_diagnostics(
+        r"
+workflow ci {
+    stage build {
+        template base [
+            step run { cargo build }
+        ]
+
+        template extra [
+            step lint { cargo clippy }
+        ]
+
+        template combined (inherit = [base, extra]) [
+            step doc { cargo doc }
+        ]
+
+        job compile (inherit = combined) [ steps, ]
+    }
+}
+",
+    );
+}
+
+#[test]
+fn valid_job_inherit_list() {
+    assert_no_diagnostics(
+        r"
+workflow ci {
+    stage build {
+        template base [
+            step setup { rustup update }
+            step build { cargo build }
+        ]
+
+        template extra [
+            step lint { cargo clippy }
+        ]
+
+        job compile (inherit = [base, extra]) [ steps, ]
+    }
+}
+",
+    );
+}
+
+#[test]
+fn valid_template_inherit_cross_file_ref() {
+    assert_no_diagnostics(
+        r"
+workflow ci {
+    stage build {
+        template extended (inherit = upstream/base) [
+            step test { cargo test }
+        ]
+
+        job compile (inherit = extended) [ steps, ]
+    }
+}
+",
+    );
+}
+
+#[test]
+fn warning_template_inherit_unknown() {
+    assert_has_diagnostic(
+        r"
+workflow ci {
+    stage build {
+        template extended (inherit = nonexistent) [
+            step test { cargo test }
+        ]
+
+        job compile (inherit = extended) [ steps, ]
+    }
+}
+",
+        Severity::Warning,
+        "template inherits from `nonexistent`, but no template with that name is defined in this scope",
+    );
+}
+
+#[test]
+fn warning_job_inherit_list_unknown() {
+    assert_has_diagnostic(
+        r"
+workflow ci {
+    stage build {
+        template base [
+            step run { cargo build }
+        ]
+
+        job compile (inherit = [base, nonexistent]) [
+            steps,
+        ]
+    }
+}
+",
+        Severity::Warning,
+        "job inherits from `nonexistent`, but no template with that name is defined in this stage or at the top level",
+    );
+}
+
+#[test]
+fn valid_job_inherit_list_no_false_positive_for_cross_file() {
+    let diags = run(r"
+workflow ci {
+    stage build {
+        job compile (inherit = [upstream/base, local/tmpl]) [
+            step run { cargo build }
+        ]
+    }
+}
+");
+    let has_unknown = diags.iter().any(|d| {
+        d.severity == Severity::Warning && d.message.contains("no template with that name")
+    });
+    assert!(
+        !has_unknown,
+        "cross-file refs in list inherit should not produce unknown-template warnings"
+    );
+}
+
 // ── valid: all known attrs accepted without error ─────────────────────────────
 
 #[test]

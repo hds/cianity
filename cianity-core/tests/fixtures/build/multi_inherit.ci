@@ -1,0 +1,16 @@
+workflow ci {
+    stage build {
+        template base [
+            step setup { rustup update }
+            step build { cargo build }
+        ]
+
+        template extra [
+            step lint { cargo clippy }
+        ]
+
+        job compile (inherit = [base, extra]) [
+            steps,
+        ]
+    }
+}

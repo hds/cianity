@@ -87,6 +87,140 @@ struct TemplateData {
     needs: Vec<JobRef>,
 }
 
+/// Raw template data before inheritance is resolved: own attributes plus
+/// the list of local template names to inherit from (in order, last wins).
+struct RawTemplateEntry {
+    own: TemplateData,
+    inherit_names: Vec<String>,
+}
+
+/// Merge `overlay` on top of `base`.
+///
+/// - Steps: overlay steps replace same-named base steps; new overlay steps are appended.
+/// - Image: overlay image wins if present, otherwise base image.
+/// - Needs: overlay needs win if non-empty, otherwise base needs.
+fn merge_template_data(base: TemplateData, overlay: TemplateData) -> TemplateData {
+    let mut steps = base.steps;
+    for (name, shell) in overlay.steps {
+        match steps.iter_mut().find(|(n, _)| n == &name) {
+            Some((_, existing)) => *existing = shell,
+            None => steps.push((name, shell)),
+        }
+    }
+    let image = overlay.image.or(base.image);
+    let needs = if overlay.needs.is_empty() {
+        base.needs
+    } else {
+        overlay.needs
+    };
+    TemplateData {
+        steps,
+        image,
+        needs,
+    }
+}
+
+fn inherit_names_from_attr(attr: &ast::Attr) -> Vec<String> {
+    attr.value_text().map_or_else(
+        || {
+            attr.value()
+                .and_then(|av| av.ref_list())
+                .map(|rl| rl.refs().map(|r| r.text()).collect())
+                .unwrap_or_default()
+        },
+        |v| vec![v.to_string()],
+    )
+}
+
+fn raw_template_data_from_ast(tmpl: &ast::TemplateDef) -> (TemplateData, Vec<String>) {
+    let steps = tmpl
+        .body()
+        .map_or_else(Vec::new, |b| collect_template_steps(&b));
+    let mut image = None;
+    let mut needs = Vec::new();
+    let mut inherit_names = Vec::new();
+    if let Some(al) = tmpl.attr_list() {
+        for attr in al.attrs() {
+            match attr.key_text().as_deref() {
+                Some("image") => image = attr.value_text().map(|s| s.to_string()),
+                Some("dependencies") => {
+                    if let Some(val) = attr.value() {
+                        needs = refs_from_attr_value(&val);
+                    }
+                }
+                Some("inherit") => inherit_names = inherit_names_from_attr(&attr),
+                _ => {}
+            }
+        }
+    }
+    (
+        TemplateData {
+            steps,
+            image,
+            needs,
+        },
+        inherit_names,
+    )
+}
+
+fn template_data_from_ast(tmpl: &ast::TemplateDef) -> TemplateData {
+    raw_template_data_from_ast(tmpl).0
+}
+
+/// Resolve one template by name, following its `inherit` chain.
+///
+/// `local` contains raw (unresolved) templates at the current scope.
+/// `parent` contains already-resolved templates from the enclosing scope
+/// (e.g. root-level templates when resolving stage-level templates).
+/// `resolved` is the memoisation cache for the current resolution pass.
+/// `stack` tracks the current resolution path for cycle detection.
+fn resolve_template(
+    name: &str,
+    local: &HashMap<String, RawTemplateEntry>,
+    parent: &HashMap<String, TemplateData>,
+    resolved: &mut HashMap<String, TemplateData>,
+    stack: &mut Vec<String>,
+) -> TemplateData {
+    if let Some(data) = resolved.get(name) {
+        return data.clone();
+    }
+    // Local scope shadows parent scope.
+    let Some(raw) = local.get(name) else {
+        return parent.get(name).cloned().unwrap_or_default();
+    };
+    if stack.iter().any(|n| n == name) {
+        // Circular inheritance — break cycle by contributing nothing.
+        return TemplateData::default();
+    }
+    stack.push(name.to_string());
+    let mut merged = TemplateData::default();
+    for parent_name in &raw.inherit_names {
+        if parent_name.contains('/') {
+            // Cross-file refs are not resolved inside template inheritance chains.
+            continue;
+        }
+        let parent_data = resolve_template(parent_name, local, parent, resolved, stack);
+        merged = merge_template_data(merged, parent_data);
+    }
+    merged = merge_template_data(merged, raw.own.clone());
+    stack.pop();
+    resolved.insert(name.to_string(), merged.clone());
+    merged
+}
+
+/// Resolve all templates in `local`, using `parent` as the enclosing scope.
+fn resolve_all(
+    local: &HashMap<String, RawTemplateEntry>,
+    parent: &HashMap<String, TemplateData>,
+) -> HashMap<String, TemplateData> {
+    let mut resolved = HashMap::new();
+    let mut stack = Vec::new();
+    for name in local.keys() {
+        resolve_template(name, local, parent, &mut resolved, &mut stack);
+    }
+    resolved
+}
+
 fn strategy_from_root(root: &Root) -> WorkflowStrategy {
     root.workflow_defs()
         .next()
@@ -121,32 +255,34 @@ pub fn lower(root: &Root) -> Workflow {
             continue;
         };
 
-        let stage_templates = collect_local_templates(&body);
+        let stage_templates = collect_local_templates(&body, &root_templates);
         let mut jobs = Vec::new();
 
         for job in body.jobs() {
             let job_name = job.name().map_or_else(String::new, |s| s.to_string());
-            let (mut image, inherit, mut needs) = parse_job_attrs(&job);
+            let (mut image, inherit_names, mut needs) = parse_job_attrs(&job);
 
-            // Stage-local templates shadow root-level templates.
-            let template_data = inherit
-                .as_deref()
-                .filter(|t| !t.contains('/'))
-                .and_then(|t| stage_templates.get(t).or_else(|| root_templates.get(t)));
+            let mut template_data = TemplateData::default();
+            for name in &inherit_names {
+                if name.contains('/') {
+                    continue; // No path context; cross-file refs produce empty scripts.
+                }
+                if let Some(td) = stage_templates
+                    .get(name)
+                    .or_else(|| root_templates.get(name))
+                {
+                    template_data = merge_template_data(template_data, td.clone());
+                }
+            }
 
             if image.is_none() {
-                image = template_data.and_then(|td| td.image.clone());
+                image.clone_from(&template_data.image);
             }
-            if needs.is_empty()
-                && let Some(td) = template_data
-            {
-                needs.clone_from(&td.needs);
+            if needs.is_empty() {
+                needs.clone_from(&template_data.needs);
             }
 
-            let empty: Vec<(String, String)> = Vec::new();
-            let template_steps = template_data.map_or(empty.as_slice(), |td| td.steps.as_slice());
-
-            let script = job_script(&job, template_steps);
+            let script = job_script(&job, &template_data.steps);
 
             jobs.push(Job {
                 name: job_name,
@@ -192,35 +328,33 @@ pub fn lower_with_path(root: &Root, path: &Path) -> anyhow::Result<Workflow> {
             continue;
         };
 
-        let stage_templates = collect_local_templates(&body);
+        let stage_templates = collect_local_templates(&body, &root_templates);
         let mut jobs = Vec::new();
 
         for job in body.jobs() {
             let job_name = job.name().map_or_else(String::new, |s| s.to_string());
-            let (mut image, inherit, mut needs) = parse_job_attrs(&job);
+            let (mut image, inherit_names, mut needs) = parse_job_attrs(&job);
 
-            let template_data: TemplateData = if let Some(name) = inherit.as_deref() {
-                if let Some((import_name, template_ref)) = name.split_once('/') {
+            let mut template_data = TemplateData::default();
+            for name in &inherit_names {
+                let td = if let Some((import_name, template_ref)) = name.split_once('/') {
                     let file_path = import_map
                         .get(import_name)
                         .ok_or_else(|| anyhow::anyhow!("unknown import `{import_name}`"))?;
-                    // `ns/tmpl` → top-level; `ns/stage.tmpl` → stage-local
                     if let Some((sname, tname)) = template_ref.split_once('.') {
                         load_cross_file_stage_template(file_path, sname, tname)?
                     } else {
                         load_cross_file_top_level_template(file_path, template_ref)?
                     }
                 } else {
-                    // Stage-local shadows root-level.
                     stage_templates
                         .get(name)
                         .or_else(|| root_templates.get(name))
                         .cloned()
                         .unwrap_or_default()
-                }
-            } else {
-                TemplateData::default()
-            };
+                };
+                template_data = merge_template_data(template_data, td);
+            }
 
             if image.is_none() {
                 image.clone_from(&template_data.image);
@@ -252,58 +386,41 @@ pub fn lower_with_path(root: &Root, path: &Path) -> anyhow::Result<Workflow> {
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
 fn collect_root_templates(root: &Root) -> HashMap<String, TemplateData> {
-    root.templates()
+    let local: HashMap<String, RawTemplateEntry> = root
+        .templates()
         .filter_map(|t| {
             let name = t.name()?.to_string();
-            Some((name, template_data_from_ast(&t)))
+            let (own, inherit_names) = raw_template_data_from_ast(&t);
+            Some((name, RawTemplateEntry { own, inherit_names }))
         })
-        .collect()
+        .collect();
+    resolve_all(&local, &HashMap::new())
 }
 
-fn collect_local_templates(body: &ast::StageBody) -> HashMap<String, TemplateData> {
-    body.templates()
+fn collect_local_templates(
+    body: &ast::StageBody,
+    root_resolved: &HashMap<String, TemplateData>,
+) -> HashMap<String, TemplateData> {
+    let local: HashMap<String, RawTemplateEntry> = body
+        .templates()
         .filter_map(|t| {
             let name = t.name()?.to_string();
-            Some((name, template_data_from_ast(&t)))
+            let (own, inherit_names) = raw_template_data_from_ast(&t);
+            Some((name, RawTemplateEntry { own, inherit_names }))
         })
-        .collect()
+        .collect();
+    resolve_all(&local, root_resolved)
 }
 
-fn template_data_from_ast(tmpl: &ast::TemplateDef) -> TemplateData {
-    let steps = tmpl
-        .body()
-        .map_or_else(Vec::new, |b| collect_template_steps(&b));
+fn parse_job_attrs(job: &ast::Job) -> (Option<String>, Vec<String>, Vec<JobRef>) {
     let mut image = None;
-    let mut needs = Vec::new();
-    if let Some(al) = tmpl.attr_list() {
-        for attr in al.attrs() {
-            match attr.key_text().as_deref() {
-                Some("image") => image = attr.value_text().map(|s| s.to_string()),
-                Some("dependencies") => {
-                    if let Some(val) = attr.value() {
-                        needs = refs_from_attr_value(&val);
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-    TemplateData {
-        steps,
-        image,
-        needs,
-    }
-}
-
-fn parse_job_attrs(job: &ast::Job) -> (Option<String>, Option<String>, Vec<JobRef>) {
-    let mut image = None;
-    let mut inherit = None;
+    let mut inherit_names = Vec::new();
     let mut needs = Vec::new();
     if let Some(al) = job.attr_list() {
         for attr in al.attrs() {
             match attr.key_text().as_deref() {
                 Some("image") => image = attr.value_text().map(|s| s.to_string()),
-                Some("inherit") => inherit = attr.value_text().map(|s| s.to_string()),
+                Some("inherit") => inherit_names = inherit_names_from_attr(&attr),
                 Some("dependencies") => {
                     if let Some(val) = attr.value() {
                         needs = refs_from_attr_value(&val);
@@ -313,7 +430,7 @@ fn parse_job_attrs(job: &ast::Job) -> (Option<String>, Option<String>, Vec<JobRe
             }
         }
     }
-    (image, inherit, needs)
+    (image, inherit_names, needs)
 }
 
 fn refs_from_attr_value(val: &ast::AttrValue) -> Vec<JobRef> {

@@ -138,6 +138,16 @@ fn build_strategy_none() {
     assert_gitlab_snapshot("strategy_none");
 }
 
+#[test]
+fn build_template_inherit() {
+    assert_gitlab_snapshot("template_inherit");
+}
+
+#[test]
+fn build_multi_inherit() {
+    assert_gitlab_snapshot("multi_inherit");
+}
+
 // ── error cases ───────────────────────────────────────────────────────────────
 
 #[test]
