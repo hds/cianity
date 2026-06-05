@@ -2,7 +2,7 @@ use crate::{
     ast::{
         AstNode, Attr, AttrList, AttrValue, HasAttrList, HasName, Job, JobBodyInline, JobBodySteps,
         PathList, Ref, RefList, ReturnAnnotation, Root, Stage, StageBody, Step, StepsKeyword,
-        TemplateDef, UseDecl, WorkflowBody, WorkflowDef,
+        TemplateDef, UseDecl, VarEntry, VarList, VarUnset, WorkflowBody, WorkflowDef,
     },
     syntax::SyntaxKind,
 };
@@ -405,7 +405,43 @@ impl Printer {
             self.push_str(&text);
         } else if let Some(ref_list) = value.ref_list() {
             self.print_ref_list(&ref_list);
+        } else if let Some(var_list) = value.var_list() {
+            self.print_var_list(&var_list);
         }
+    }
+
+    fn print_var_list(&mut self, list: &VarList) {
+        let has_items = list
+            .syntax()
+            .children()
+            .any(|n| matches!(n.kind(), SyntaxKind::VarEntry | SyntaxKind::VarUnset));
+        if !has_items {
+            self.push_str("()");
+            return;
+        }
+        self.push_str("( ");
+        let mut first = true;
+        for child in list.syntax().children() {
+            if let Some(entry) = VarEntry::cast(child.clone()) {
+                if first {
+                    first = false;
+                } else {
+                    self.push_str(", ");
+                }
+                self.push_str(entry.key_text().as_deref().unwrap_or(""));
+                self.push_str(" = ");
+                self.push_str(entry.value_text().as_deref().unwrap_or(""));
+            } else if let Some(unset) = VarUnset::cast(child) {
+                if first {
+                    first = false;
+                } else {
+                    self.push_str(", ");
+                }
+                self.push_str("unset ");
+                self.push_str(unset.key_text().as_deref().unwrap_or(""));
+            }
+        }
+        self.push_str(" )");
     }
 
     fn print_ref_list(&mut self, list: &RefList) {

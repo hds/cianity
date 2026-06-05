@@ -23,7 +23,8 @@ syntax match cianeStageName "\<[a-zA-Z_][a-zA-Z0-9_-]*\>"
 
 syntax region cianeStageAttrs matchgroup=cianeParen start="(" end=")"
       \ contained nextgroup=cianeStageBlock skipwhite skipnl
-      \ contains=cianeAttrKey,cianeEq,cianeBareValue,cianeNumber,cianeBracketList,cianeComma,cianeComment
+      \ skip="([^)]*)"
+      \ contains=cianeAttrKey,cianeEq,cianeBareValue,cianeNumber,cianeBracketList,cianeVarList,cianeComma,cianeComment
       \ fold
 
 " Stage body: may only contain job/template definitions.
@@ -41,7 +42,8 @@ syntax match cianeJobName "\<[a-zA-Z_][a-zA-Z0-9_-]*\>"
 
 syntax region cianeJobAttrs matchgroup=cianeParen start="(" end=")"
       \ contained nextgroup=cianeShellBlock,cianeBracketList skipwhite skipnl
-      \ contains=cianeAttrKey,cianeEq,cianeBareValue,cianeNumber,cianeBracketList,cianeComma,cianeComment
+      \ skip="([^)]*)"
+      \ contains=cianeAttrKey,cianeEq,cianeBareValue,cianeNumber,cianeBracketList,cianeVarList,cianeComma,cianeComment
       \ fold
 
 " ── Template ──────────────────────────────────────────────────────────────────
@@ -53,6 +55,7 @@ syntax match cianeTemplateName "\<[a-zA-Z_][a-zA-Z0-9_-]*\>"
 
 syntax region cianeTemplateAttrs matchgroup=cianeParen start="(" end=")"
       \ contained nextgroup=cianeShellBlock,cianeBracketList skipwhite skipnl
+      \ skip="([^)]*)"
       \ contains=cianeAttrKey,cianeEq,cianeBareValue,cianeNumber,cianeBracketList,cianeVarList,cianeComma,cianeComment
       \ fold
 
@@ -63,6 +66,15 @@ syntax region cianeBracketList matchgroup=cianeBracket start="\[" end="\]"
       \ contains=cianeStepKw,cianeStepsKw,cianeRef,cianeRefSep,cianeComma,cianeComment,cianeShellBlock
       \ nextgroup=cianeArrow skipwhite skipnl
       \ fold
+
+" ── Variable list: ( KEY = value, ... ) inside a variables attribute ──────────
+" Using match (not region) so the entire (...) is consumed as one token and the
+" closing ) never prematurely ends the parent attr region.
+syntax match cianeVarList "([^)]*)"
+      \ contained
+      \ contains=cianeUnsetKw,cianeAttrKey,cianeEq,cianeBareValue,cianeNumber,cianeComma,cianeComment
+
+syntax keyword cianeUnsetKw unset contained nextgroup=cianeAttrKey,cianeBareValue skipwhite
 
 " ── Step ──────────────────────────────────────────────────────────────────────
 syntax keyword cianeStepKw  step  nextgroup=cianeStepName skipwhite contained
@@ -145,6 +157,7 @@ highlight default link cianeJobKw      Keyword
 highlight default link cianeTemplateKw Keyword
 highlight default link cianeStepKw     Keyword
 highlight default link cianeStepsKw    Keyword
+highlight default link cianeUnsetKw    Keyword
 highlight default link cianeWorkflowKw Keyword
 
 highlight default link cianeWorkflowDefName Function
@@ -169,6 +182,7 @@ highlight default link cianeTodo       Todo
 highlight default link cianeArrow      Operator
 highlight default link cianeEnvVar     Identifier
 highlight default link cianeReturnPath String
+highlight default link cianeVarList    Delimiter
 
 let b:current_syntax = "ciane"
 

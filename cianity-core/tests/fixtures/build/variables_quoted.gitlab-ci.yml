@@ -1,0 +1,13 @@
+stages:
+  - build
+
+release:
+  stage: build
+  dependencies: []
+  variables:
+    EMPTY: ""
+    SPACED: " mog "
+    SINGLE: 'hi'
+    BARE: bare
+  script:
+    - cargo build

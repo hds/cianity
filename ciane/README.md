@@ -307,3 +307,18 @@ used to soecify a list of all jobs for which we want dependencies.
 
 In generated GitLab pipeline, jobs that don't specify dependencies will be explicitly set with an
 empty list to avoid unncessary downloads.
+
+### Variabels
+[`variables`]: #variables
+
+- Accepted on [`job`], [`template`]
+
+A job or template can specify environment variables which will be available to the scripts running
+in the body of the job. Variables are key/value pairs and are specified in the same way as
+attributes.
+
+```ciane
+job build ( variables = ( RUST_BACKTRACE = 1, CARGO_TERM_COLOR = always ) ) { cargo build }
+```
+
+Currently, variables are passed into a GitLab pipeline config files pretty much as-is.

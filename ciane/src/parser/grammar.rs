@@ -101,17 +101,20 @@ fn attr_list_body(p: &mut Parser<'_>) {
 fn attr(p: &mut Parser<'_>) {
     p.start_node(SyntaxKind::Attr);
     let is_path_attr = p.current_text() == "artifacts";
+    let is_var_attr = p.current_text() == "variables";
     p.bump(); // attribute name
     p.expect(SyntaxKind::Eq);
-    attr_value(p, is_path_attr);
+    attr_value(p, is_path_attr, is_var_attr);
     p.eat_optional(SyntaxKind::Comma);
     p.finish_node();
 }
 
-fn attr_value(p: &mut Parser<'_>, use_path_list: bool) {
+fn attr_value(p: &mut Parser<'_>, use_path_list: bool, use_var_list: bool) {
     p.start_node(SyntaxKind::AttrValue);
     if use_path_list && p.at(SyntaxKind::LBracket) {
         path_list(p);
+    } else if use_var_list && p.at(SyntaxKind::LParen) {
+        var_list(p);
     } else if p.at(SyntaxKind::LBracket) {
         ref_list(p);
     } else if p.at(SyntaxKind::BareValue) {
@@ -119,6 +122,49 @@ fn attr_value(p: &mut Parser<'_>, use_path_list: bool) {
     } else {
         p.error("expected attribute value");
     }
+    p.finish_node();
+}
+
+fn var_list(p: &mut Parser<'_>) {
+    p.start_node(SyntaxKind::VarList);
+    p.expect(SyntaxKind::LParen);
+    while !p.at(SyntaxKind::RParen) && !p.at(SyntaxKind::Eof) {
+        if p.at(SyntaxKind::Ident) {
+            var_entry(p);
+        } else if p.at(SyntaxKind::KwUnset) {
+            var_unset(p);
+        } else if p.at(SyntaxKind::Comma) {
+            p.bump();
+        } else {
+            p.error_bump("expected variable name, `unset`, or `)`");
+        }
+    }
+    p.expect(SyntaxKind::RParen);
+    p.finish_node();
+}
+
+fn var_entry(p: &mut Parser<'_>) {
+    p.start_node(SyntaxKind::VarEntry);
+    p.expect(SyntaxKind::Ident); // key
+    p.expect(SyntaxKind::Eq);
+    if p.at(SyntaxKind::BareValue) {
+        p.bump();
+    } else {
+        p.error("expected variable value");
+    }
+    p.eat_optional(SyntaxKind::Comma);
+    p.finish_node();
+}
+
+fn var_unset(p: &mut Parser<'_>) {
+    p.start_node(SyntaxKind::VarUnset);
+    p.expect(SyntaxKind::KwUnset);
+    if p.at(SyntaxKind::Ident) {
+        p.bump(); // variable name
+    } else {
+        p.error("expected variable name after `unset`");
+    }
+    p.eat_optional(SyntaxKind::Comma);
     p.finish_node();
 }
 

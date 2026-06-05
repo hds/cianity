@@ -176,9 +176,26 @@
         "2": { "name": "keyword.operator.assignment.ciane" }
       },
       "patterns": [
+        { "include": "#var-list" },
         { "include": "#ref-list" },
         { "include": "#number" },
         { "include": "#bare-value" }
+      ]
+    },
+
+    "var-list": {
+      "comment": "( KEY = value, … ) — variable definitions in a variables attribute",
+      "begin": "\\(",
+      "end": "\\)",
+      "beginCaptures": { "0": { "name": "punctuation.section.parens.begin.ciane" } },
+      "endCaptures":   { "0": { "name": "punctuation.section.parens.end.ciane" } },
+      "patterns": [
+        { "include": "#comment" },
+        {
+          "match": "\\bunset\\b",
+          "name": "keyword.other.ciane"
+        },
+        { "include": "#attr" }
       ]
     },
 

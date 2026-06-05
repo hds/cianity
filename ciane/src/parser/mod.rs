@@ -127,6 +127,7 @@ impl<'src> Parser<'src> {
                 | SyntaxKind::KwTemplate
                 | SyntaxKind::KwWorkflow
                 | SyntaxKind::KwDefaults
+                | SyntaxKind::KwUnset
         )
     }
 

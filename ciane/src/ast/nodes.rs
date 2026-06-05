@@ -42,6 +42,9 @@ ast_node!(Ref, Ref);
 ast_node!(PathList, PathList);
 ast_node!(PathItem, PathItem);
 ast_node!(ReturnAnnotation, ReturnAnnotation);
+ast_node!(VarList, VarList);
+ast_node!(VarEntry, VarEntry);
+ast_node!(VarUnset, VarUnset);
 ast_node!(Stage, Stage);
 ast_node!(StageBody, StageBody);
 ast_node!(Job, Job);
@@ -180,6 +183,7 @@ fn is_kw(kind: SyntaxKind) -> bool {
             | SyntaxKind::KwTemplate
             | SyntaxKind::KwWorkflow
             | SyntaxKind::KwDefaults
+            | SyntaxKind::KwUnset
     )
 }
 
@@ -231,6 +235,12 @@ impl AttrValue {
         self.0.children().find_map(PathList::cast)
     }
 
+    /// The `VarList` child, if this is a variables list value.
+    #[must_use]
+    pub fn var_list(&self) -> Option<VarList> {
+        self.0.children().find_map(VarList::cast)
+    }
+
     /// The `BareValue` token text, if this is a scalar value.
     #[must_use]
     pub fn bare_text(&self) -> Option<SmolStr> {
@@ -278,6 +288,55 @@ impl PathItem {
         self.0
             .children_with_tokens()
             .find_map(|e| e.into_token().filter(|t| t.kind() == SyntaxKind::PathValue))
+            .map(|t| t.text().into())
+    }
+}
+
+// ─── VarList ──────────────────────────────────────────────────────────────────
+
+impl VarList {
+    /// All `VarEntry` children (set operations).
+    pub fn entries(&self) -> impl Iterator<Item = VarEntry> + '_ {
+        self.0.children().filter_map(VarEntry::cast)
+    }
+
+    /// All `VarUnset` children (unset operations).
+    pub fn unsets(&self) -> impl Iterator<Item = VarUnset> + '_ {
+        self.0.children().filter_map(VarUnset::cast)
+    }
+}
+
+// ─── VarEntry ─────────────────────────────────────────────────────────────────
+
+impl VarEntry {
+    /// The variable name (key) text.
+    #[must_use]
+    pub fn key_text(&self) -> Option<SmolStr> {
+        self.0
+            .children_with_tokens()
+            .find_map(|e| e.into_token().filter(|t| t.kind() == SyntaxKind::Ident))
+            .map(|t| t.text().into())
+    }
+
+    /// The variable value text.
+    #[must_use]
+    pub fn value_text(&self) -> Option<SmolStr> {
+        self.0
+            .children_with_tokens()
+            .find_map(|e| e.into_token().filter(|t| t.kind() == SyntaxKind::BareValue))
+            .map(|t| t.text().into())
+    }
+}
+
+// ─── VarUnset ─────────────────────────────────────────────────────────────────
+
+impl VarUnset {
+    /// The name of the variable to unset.
+    #[must_use]
+    pub fn key_text(&self) -> Option<SmolStr> {
+        self.0
+            .children_with_tokens()
+            .find_map(|e| e.into_token().filter(|t| t.kind() == SyntaxKind::Ident))
             .map(|t| t.text().into())
     }
 }

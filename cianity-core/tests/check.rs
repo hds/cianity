@@ -69,6 +69,21 @@ fn valid_cross_file_stage_template() {
     assert_check_passes("cross_file_stage_template");
 }
 
+#[test]
+fn valid_variables_basic() {
+    assert_check_passes("variables_basic");
+}
+
+#[test]
+fn valid_variables_from_template() {
+    assert_check_passes("variables_from_template");
+}
+
+#[test]
+fn valid_variables_unset() {
+    assert_check_passes("variables_unset");
+}
+
 // ── invalid fixtures ──────────────────────────────────────────────────────────
 
 #[test]

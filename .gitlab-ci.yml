@@ -7,16 +7,20 @@ build_debug:
   stage: build
   image: "rust:1.96-slim-trixie"
   dependencies: []
+  variables:
+    RELEASE_FLAG: ""
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - if: $CI_MERGE_REQUEST_IID
   script:
-    - cargo build --workspace
+    - cargo build $RELEASE_FLAG --workspace
 
 build_release:
   stage: build
   image: "rust:1.96-slim-trixie"
   dependencies: []
+  variables:
+    RELEASE_FLAG: --release
   artifacts:
     paths:
       - target/release/cianity
@@ -24,7 +28,7 @@ build_release:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - if: $CI_MERGE_REQUEST_IID
   script:
-    - cargo build --release --workspace
+    - cargo build $RELEASE_FLAG --workspace
 
 test:
   stage: test

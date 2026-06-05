@@ -67,14 +67,14 @@ impl<'src> Lexer<'src> {
         &self.src[start..self.pos]
     }
 
-    /// Peek past whitespace to check whether the next non-whitespace byte is `[`.
-    fn next_non_ws_is_bracket(&self) -> bool {
+    /// Peek past whitespace to check whether the next non-whitespace byte is `[` or `(`.
+    fn next_non_ws_is_bracket_or_paren(&self) -> bool {
         let bytes = self.src.as_bytes();
         let mut i = self.pos;
         while i < bytes.len() && (bytes[i] == b' ' || bytes[i] == b'\t') {
             i += 1;
         }
-        bytes.get(i) == Some(&b'[')
+        matches!(bytes.get(i), Some(b'[' | b'('))
     }
 
     fn next_normal(&mut self) -> Option<(SyntaxKind, &'src str)> {
@@ -121,7 +121,7 @@ impl<'src> Lexer<'src> {
             }
             b'=' => {
                 let text = self.advance(1);
-                if self.paren_depth > 0 && !self.next_non_ws_is_bracket() {
+                if self.paren_depth > 0 && !self.next_non_ws_is_bracket_or_paren() {
                     self.mode = LexMode::AttrValue;
                 }
                 return Some((SyntaxKind::Eq, text));
@@ -438,6 +438,24 @@ mod tests {
         // Should contain LBracket, Ident, Dot, Ident, RBracket
         assert!(kinds_only.contains(&SyntaxKind::LBracket));
         assert!(kinds_only.contains(&SyntaxKind::Dot));
+    }
+
+    #[test]
+    fn attr_value_var_list_not_bare() {
+        // "variables = (KEY = val)" — the `(` prevents AttrValue mode for the outer `=`;
+        // the inner `=` *does* trigger AttrValue mode so `val` becomes a BareValue.
+        let src = "(variables = (KEY = val))";
+        let toks = lex_all(src);
+        // The outer `=` (variables =) must NOT produce a BareValue that swallows the `(`.
+        // The inner `=` (KEY =) MUST produce a BareValue for "val".
+        let kinds_only: Vec<_> = toks
+            .iter()
+            .filter(|(k, _)| !matches!(k, SyntaxKind::Whitespace | SyntaxKind::Eof))
+            .map(|(k, _)| *k)
+            .collect();
+        assert!(kinds_only.contains(&SyntaxKind::LParen));
+        assert!(kinds_only.contains(&SyntaxKind::Ident)); // KEY
+        assert!(kinds_only.contains(&SyntaxKind::BareValue)); // val
     }
 
     #[test]

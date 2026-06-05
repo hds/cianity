@@ -1,0 +1,7 @@
+workflow ci {
+    stage build {
+        job compile (
+            variables = (RUST_BACKTRACE = 1, CARGO_TERM_COLOR = always),
+        ) { cargo build }
+    }
+}

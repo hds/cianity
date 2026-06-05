@@ -32,6 +32,10 @@
 //! | `return_annotation_env` | `->` syntax for env vars only; emits `variables:` |
 //! | `return_annotation_both` | `->` syntax for both paths and env vars |
 //! | `return_annotation_template` | `->` on template propagates paths and env to inheriting job |
+//! | `variables_basic` | `variables = (KEY = val)` on a job; appears in `variables:` block |
+//! | `variables_from_template` | template `variables` propagates to inheriting job; job override wins |
+//! | `variables_unset` | `unset KEY` inside `variables = (...)` removes an inherited variable |
+//! | `variables_quoted` | quoted (`""`, `''`) and bare values pass through correctly to YAML |
 
 use std::path::{Path, PathBuf};
 
@@ -188,6 +192,33 @@ fn build_return_annotation_both() {
 #[test]
 fn build_return_annotation_template() {
     assert_gitlab_snapshot("return_annotation_template");
+}
+
+// ── variables ────────────────────────────────────────────────────────────────
+
+#[test]
+fn build_variables_basic() {
+    assert_gitlab_snapshot("variables_basic");
+}
+
+#[test]
+fn build_variables_from_template() {
+    assert_gitlab_snapshot("variables_from_template");
+}
+
+#[test]
+fn build_variables_unset() {
+    assert_gitlab_snapshot("variables_unset");
+}
+
+#[test]
+fn build_variables_quoted() {
+    assert_gitlab_snapshot("variables_quoted");
+}
+
+#[test]
+fn build_template_inline_body() {
+    assert_gitlab_snapshot("template_inline_body");
 }
 
 // ── error cases ───────────────────────────────────────────────────────────────

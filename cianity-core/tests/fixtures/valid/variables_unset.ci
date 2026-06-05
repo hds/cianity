@@ -1,0 +1,13 @@
+workflow ci {
+    stage build {
+        template base (
+            variables = (RUST_BACKTRACE = 1, CARGO_TERM_COLOR = always),
+        ) [
+            step build { cargo build }
+        ]
+        job lint (
+            inherit = base,
+            variables = (unset CARGO_TERM_COLOR),
+        ) [ steps, ]
+    }
+}

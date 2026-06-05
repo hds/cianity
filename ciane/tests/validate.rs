@@ -735,6 +735,7 @@ workflow ci {
             image = rust:latest,
             inherit = base,
             dependencies = [build.compile],
+            variables = (RUST_BACKTRACE = 1),
         ) [ steps, ]
     }
 }
@@ -751,11 +752,40 @@ workflow ci {
         template base (
             image = rust:latest,
             dependencies = [build.other],
+            variables = (CARGO_TERM_COLOR = always),
         ) [
             step run { cargo build }
         ]
         job other { cargo check }
         job compile (inherit = base) [ steps, ]
+    }
+}
+",
+    );
+}
+
+#[test]
+fn valid_variables_attr_on_job() {
+    assert_no_diagnostics(
+        r"
+workflow ci {
+    stage build {
+        job compile (
+            variables = (RUST_BACKTRACE = 1, CARGO_TERM_COLOR = always),
+        ) { cargo build }
+    }
+}
+",
+    );
+}
+
+#[test]
+fn valid_variables_attr_empty() {
+    assert_no_diagnostics(
+        r"
+workflow ci {
+    stage build {
+        job compile (variables = ()) { cargo build }
     }
 }
 ",

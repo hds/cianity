@@ -1,0 +1,19 @@
+stages:
+  - build
+
+compile:
+  stage: build
+  dependencies: []
+  variables:
+    RUST_BACKTRACE: 1
+    CARGO_TERM_COLOR: always
+  script:
+    - cargo build
+
+lint:
+  stage: build
+  dependencies: []
+  variables:
+    RUST_BACKTRACE: 1
+  script:
+    - cargo build

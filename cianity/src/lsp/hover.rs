@@ -32,6 +32,9 @@ fn hover_content(token: &SyntaxToken) -> Option<String> {
         SyntaxKind::KwTemplate => Some("**template** — a reusable sequence of steps".into()),
         SyntaxKind::KwUse => Some("**use** — imports external workflows".into()),
         SyntaxKind::KwWorkflow => Some("**workflow** — declares a CI workflow".into()),
+        SyntaxKind::KwUnset => {
+            Some("**unset** — removes a variable inherited from a template".into())
+        }
         SyntaxKind::Ident => hover_for_ident(token),
         SyntaxKind::BareValue => hover_for_bare_value(token),
         _ => None,
@@ -79,6 +82,7 @@ fn attr_key_doc(key: &str) -> Option<&'static str> {
         "image" => Some("**image** — Docker image to run the job in"),
         "path" => Some("**path** — path to the imported workflow file"),
         "strategy" => Some("**strategy** — when this workflow runs"),
+        "variables" => Some("**variables** — CI variables passed to this job"),
         _ => None,
     }
 }

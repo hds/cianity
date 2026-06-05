@@ -19,8 +19,8 @@ const VALID_STRATEGIES: &[&str] = &[
 
 const VALID_WORKFLOW_ATTRS: &[&str] = &["strategy"];
 const VALID_STAGE_ATTRS: &[&str] = &["dependencies"];
-const VALID_JOB_ATTRS: &[&str] = &["image", "inherit", "dependencies"];
-const VALID_TEMPLATE_ATTRS: &[&str] = &["image", "inherit", "dependencies"];
+const VALID_JOB_ATTRS: &[&str] = &["image", "inherit", "dependencies", "variables"];
+const VALID_TEMPLATE_ATTRS: &[&str] = &["image", "inherit", "dependencies", "variables"];
 const VALID_USE_ATTRS: &[&str] = &["path"];
 
 fn check_unknown_attrs<N: HasAttrList>(

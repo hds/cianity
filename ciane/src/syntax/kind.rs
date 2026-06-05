@@ -15,6 +15,7 @@ pub enum SyntaxKind {
     KwTemplate,
     KwWorkflow,
     KwDefaults,
+    KwUnset,
 
     // ── Punctuation ─────────────────────────────────────────────────────────
     LBrace,
@@ -102,6 +103,12 @@ pub enum SyntaxKind {
     /// `-> [path_or_$var, …]` — optional return annotation after a job or template body.
     /// Items starting with `$` are env var names to export; others are artifact paths.
     ReturnAnnotation,
+    /// `( key = val, … )` — variable definitions list in a `variables` attribute.
+    VarList,
+    /// A single `key = value` variable definition inside a `VarList`.
+    VarEntry,
+    /// `unset key` — explicit removal of an inherited variable inside a `VarList`.
+    VarUnset,
     /// Error-recovery node wrapping skipped/unexpected tokens.
     ErrorNode,
 }

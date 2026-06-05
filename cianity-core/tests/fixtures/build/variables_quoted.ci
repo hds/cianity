@@ -1,0 +1,12 @@
+workflow ci {
+    stage build {
+        job release (
+            variables = (
+                EMPTY = "",
+                SPACED = " mog ",
+                SINGLE = 'hi',
+                BARE = bare,
+            ),
+        ) { cargo build }
+    }
+}

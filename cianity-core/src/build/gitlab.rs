@@ -166,6 +166,13 @@ fn render_job(
         }
     }
 
+    if !job.variables.is_empty() {
+        out.push_str("  variables:\n");
+        for (key, value) in &job.variables {
+            let _ = writeln!(out, "    {key}: {}", yaml_var_value(value));
+        }
+    }
+
     if !job.artifacts.is_empty() || dotenv_file.is_some() {
         out.push_str("  artifacts:\n");
         if !job.artifacts.is_empty() {
@@ -224,6 +231,25 @@ fn write_script_item(out: &mut String, cmd: &str) {
     } else {
         let _ = writeln!(out, "    - {cmd}");
     }
+}
+
+/// Render a variable value for YAML output.
+///
+/// If the value is already surrounded by matching `"…"` or `'…'` quotes in the
+/// source, those quotes are YAML-style quoting and should be passed through
+/// verbatim — wrapping them again would double-escape them.  Unquoted values
+/// go through the normal `yaml_scalar` path.
+fn yaml_var_value(value: &str) -> String {
+    if is_yaml_quoted(value) {
+        value.to_owned()
+    } else {
+        yaml_scalar(value)
+    }
+}
+
+fn is_yaml_quoted(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.len() >= 2 && matches!(b[0], b'"' | b'\'') && b[0] == b[b.len() - 1]
 }
 
 fn yaml_scalar(s: &str) -> String {

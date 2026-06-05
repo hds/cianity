@@ -12,6 +12,7 @@ pub fn keyword_kind(text: &str) -> Option<SyntaxKind> {
         "template" => Some(SyntaxKind::KwTemplate),
         "workflow" => Some(SyntaxKind::KwWorkflow),
         "defaults" => Some(SyntaxKind::KwDefaults),
+        "unset" => Some(SyntaxKind::KwUnset),
         _ => None,
     }
 }

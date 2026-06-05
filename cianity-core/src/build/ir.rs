@@ -54,6 +54,8 @@ pub struct Job {
     pub artifacts: Vec<String>,
     /// Names of environment variables this job exports to downstream jobs (no `$` prefix).
     pub env: Vec<String>,
+    /// CI variables passed directly to this job (key-value pairs).
+    pub variables: Vec<(String, String)>,
 }
 
 impl Job {
@@ -90,6 +92,10 @@ struct TemplateData {
     needs: Vec<JobRef>,
     artifacts: Vec<String>,
     env: Vec<String>,
+    variables: Vec<(String, String)>,
+    /// Variable names to remove from any base that this data is merged onto.
+    /// Always empty in fully-resolved `TemplateData`; populated only in `raw.own`.
+    unset_variables: Vec<String>,
 }
 
 /// Raw template data before inheritance is resolved: own attributes plus
@@ -99,6 +105,22 @@ struct RawTemplateEntry {
     inherit_names: Vec<String>,
 }
 
+/// Merge two variable lists: overlay entries override same-named base entries;
+/// base entries not present in the overlay are kept.
+fn merge_variables(
+    base: Vec<(String, String)>,
+    overlay: Vec<(String, String)>,
+) -> Vec<(String, String)> {
+    let mut result = base;
+    for (key, value) in overlay {
+        match result.iter_mut().find(|(k, _)| k == &key) {
+            Some((_, existing)) => *existing = value,
+            None => result.push((key, value)),
+        }
+    }
+    result
+}
+
 /// Merge `overlay` on top of `base`.
 ///
 /// - Steps: overlay steps replace same-named base steps; new overlay steps are appended.
@@ -106,6 +128,8 @@ struct RawTemplateEntry {
 /// - Needs: overlay needs win if non-empty, otherwise base needs.
 /// - Artifacts: base and overlay artifacts are concatenated (both kept).
 /// - Env: overlay env wins if non-empty, otherwise base env.
+/// - Variables: overlay `unset_variables` are removed first, then overlay entries
+///   override same-named base entries; new overlay entries are appended.
 fn merge_template_data(base: TemplateData, overlay: TemplateData) -> TemplateData {
     let mut steps = base.steps;
     for (name, shell) in overlay.steps {
@@ -127,12 +151,19 @@ fn merge_template_data(base: TemplateData, overlay: TemplateData) -> TemplateDat
     } else {
         overlay.env
     };
+    let mut base_vars = base.variables;
+    for key in &overlay.unset_variables {
+        base_vars.retain(|(k, _)| k != key);
+    }
+    let variables = merge_variables(base_vars, overlay.variables);
     TemplateData {
         steps,
         image,
         needs,
         artifacts,
         env,
+        variables,
+        unset_variables: Vec::new(), // unsets are consumed during merge
     }
 }
 
@@ -185,6 +216,8 @@ fn raw_template_data_from_ast(tmpl: &ast::TemplateDef) -> (TemplateData, Vec<Str
     let mut inherit_names = Vec::new();
     let mut artifacts = Vec::new();
     let mut env = Vec::new();
+    let mut variables = Vec::new();
+    let mut unset_variables = Vec::new();
     if let Some(al) = tmpl.attr_list() {
         for attr in al.attrs() {
             match attr.key_text().as_deref() {
@@ -195,6 +228,11 @@ fn raw_template_data_from_ast(tmpl: &ast::TemplateDef) -> (TemplateData, Vec<Str
                     }
                 }
                 Some("inherit") => inherit_names = inherit_names_from_attr(&attr),
+                Some("variables") => {
+                    if let Some(val) = attr.value() {
+                        (variables, unset_variables) = vars_and_unsets_from_attr_value(&val);
+                    }
+                }
                 _ => {}
             }
         }
@@ -215,6 +253,8 @@ fn raw_template_data_from_ast(tmpl: &ast::TemplateDef) -> (TemplateData, Vec<Str
             needs,
             artifacts,
             env,
+            variables,
+            unset_variables,
         },
         inherit_names,
     )
@@ -323,6 +363,8 @@ pub fn lower(root: &Root) -> Workflow {
                 mut needs,
                 mut artifacts,
                 mut env,
+                mut variables,
+                unset_variables,
             } = parse_job_attrs(&job);
 
             let mut template_data = TemplateData::default();
@@ -350,6 +392,11 @@ pub fn lower(root: &Root) -> Workflow {
             if env.is_empty() {
                 env.clone_from(&template_data.env);
             }
+            let mut base_vars = template_data.variables.clone();
+            for key in &unset_variables {
+                base_vars.retain(|(k, _)| k != key);
+            }
+            variables = merge_variables(base_vars, variables);
 
             let script = job_script(&job, &template_data.steps);
 
@@ -361,6 +408,7 @@ pub fn lower(root: &Root) -> Workflow {
                 needs,
                 artifacts,
                 env,
+                variables,
             });
         }
 
@@ -410,6 +458,8 @@ pub fn lower_with_path(root: &Root, path: &Path) -> anyhow::Result<Workflow> {
                 mut needs,
                 mut artifacts,
                 mut env,
+                mut variables,
+                unset_variables,
             } = parse_job_attrs(&job);
 
             let mut template_data = TemplateData::default();
@@ -445,6 +495,11 @@ pub fn lower_with_path(root: &Root, path: &Path) -> anyhow::Result<Workflow> {
             if env.is_empty() {
                 env.clone_from(&template_data.env);
             }
+            let mut base_vars = template_data.variables.clone();
+            for key in &unset_variables {
+                base_vars.retain(|(k, _)| k != key);
+            }
+            variables = merge_variables(base_vars, variables);
 
             let script = job_script(&job, &template_data.steps);
 
@@ -456,6 +511,7 @@ pub fn lower_with_path(root: &Root, path: &Path) -> anyhow::Result<Workflow> {
                 needs,
                 artifacts,
                 env,
+                variables,
             });
         }
 
@@ -474,6 +530,8 @@ struct JobAttrs {
     needs: Vec<JobRef>,
     artifacts: Vec<String>,
     env: Vec<String>,
+    variables: Vec<(String, String)>,
+    unset_variables: Vec<String>,
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -511,6 +569,8 @@ fn parse_job_attrs(job: &ast::Job) -> JobAttrs {
     let mut needs = Vec::new();
     let mut artifacts = Vec::new();
     let mut env = Vec::new();
+    let mut variables = Vec::new();
+    let mut unset_variables = Vec::new();
     if let Some(al) = job.attr_list() {
         for attr in al.attrs() {
             match attr.key_text().as_deref() {
@@ -519,6 +579,11 @@ fn parse_job_attrs(job: &ast::Job) -> JobAttrs {
                 Some("dependencies") => {
                     if let Some(val) = attr.value() {
                         needs = refs_from_attr_value(&val);
+                    }
+                }
+                Some("variables") => {
+                    if let Some(val) = attr.value() {
+                        (variables, unset_variables) = vars_and_unsets_from_attr_value(&val);
                     }
                 }
                 _ => {}
@@ -540,6 +605,8 @@ fn parse_job_attrs(job: &ast::Job) -> JobAttrs {
         needs,
         artifacts,
         env,
+        variables,
+        unset_variables,
     }
 }
 
@@ -558,6 +625,21 @@ fn refs_from_attr_value(val: &ast::AttrValue) -> Vec<JobRef> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+fn vars_and_unsets_from_attr_value(val: &ast::AttrValue) -> (Vec<(String, String)>, Vec<String>) {
+    let Some(vl) = val.var_list() else {
+        return (Vec::new(), Vec::new());
+    };
+    let vars = vl
+        .entries()
+        .filter_map(|e| Some((e.key_text()?.to_string(), e.value_text()?.to_string())))
+        .collect();
+    let unsets = vl
+        .unsets()
+        .filter_map(|u| Some(u.key_text()?.to_string()))
+        .collect();
+    (vars, unsets)
 }
 
 fn job_script(job: &ast::Job, template_steps: &[(String, String)]) -> Vec<String> {
