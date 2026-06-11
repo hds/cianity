@@ -60,6 +60,11 @@ fn valid_top_level_template() {
 }
 
 #[test]
+fn valid_template_inline_body() {
+    assert_check_passes("template_inline_body");
+}
+
+#[test]
 fn valid_cross_file_stage_template() {
     assert_check_passes("cross_file_stage_template");
 }

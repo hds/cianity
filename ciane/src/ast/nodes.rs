@@ -388,6 +388,12 @@ impl Step {
 // ─── TemplateDef ─────────────────────────────────────────────────────────────
 
 impl TemplateDef {
+    /// The inline body (`{ shell }`), if this is a single-step template.
+    #[must_use]
+    pub fn inline_body(&self) -> Option<JobBodyInline> {
+        self.0.children().find_map(JobBodyInline::cast)
+    }
+
     /// The step-list body.
     #[must_use]
     pub fn body(&self) -> Option<JobBodySteps> {

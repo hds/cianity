@@ -1,0 +1,9 @@
+stages:
+  - build
+
+compile:
+  stage: build
+  dependencies: []
+  script:
+    - rustup update
+    - cargo build

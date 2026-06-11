@@ -97,18 +97,23 @@
     },
 
     "template-def": {
-      "comment": "end: ] — step-list leaves ] via lookahead so template can consume it",
+      "comment": "end: } closes inline body; ] closes step-list; $ ends attrs-only or no-body form at EOL",
       "begin": "\\b(template)\\b\\s+([a-zA-Z_][a-zA-Z0-9_-]*)",
-      "end": "\\]",
+      "end": "(})|(\\])|$",
       "beginCaptures": {
         "1": { "name": "keyword.other.ciane" },
         "2": { "name": "entity.name.function.ciane" }
       },
-      "endCaptures": { "0": { "name": "punctuation.section.brackets.end.ciane" } },
+      "endCaptures": {
+        "1": { "name": "punctuation.section.block.end.ciane" },
+        "2": { "name": "punctuation.section.brackets.end.ciane" }
+      },
       "patterns": [
         { "include": "#comment" },
         { "include": "#attr-list" },
-        { "include": "#step-list" }
+        { "include": "#shell-body" },
+        { "include": "#step-list" },
+        { "include": "#return-annotation" }
       ]
     },
 

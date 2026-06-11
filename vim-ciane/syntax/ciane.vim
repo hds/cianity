@@ -45,15 +45,15 @@ syntax region cianeJobAttrs matchgroup=cianeParen start="(" end=")"
       \ fold
 
 " ── Template ──────────────────────────────────────────────────────────────────
-syntax keyword cianeTemplateKw template nextgroup=cianeTemplateName skipwhite contained
+syntax keyword cianeTemplateKw template nextgroup=cianeTemplateName skipwhite
 
 syntax match cianeTemplateName "\<[a-zA-Z_][a-zA-Z0-9_-]*\>"
       \ contained
-      \ nextgroup=cianeTemplateAttrs,cianeBracketList skipwhite skipnl
+      \ nextgroup=cianeTemplateAttrs,cianeShellBlock,cianeBracketList skipwhite skipnl
 
 syntax region cianeTemplateAttrs matchgroup=cianeParen start="(" end=")"
-      \ contained nextgroup=cianeBracketList skipwhite skipnl
-      \ contains=cianeAttrKey,cianeEq,cianeBareValue,cianeNumber,cianeBracketList,cianeComma,cianeComment
+      \ contained nextgroup=cianeShellBlock,cianeBracketList skipwhite skipnl
+      \ contains=cianeAttrKey,cianeEq,cianeBareValue,cianeNumber,cianeBracketList,cianeVarList,cianeComma,cianeComment
       \ fold
 
 " ── Step list / ref list: [ ... ] ─────────────────────────────────────────────

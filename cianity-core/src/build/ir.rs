@@ -170,9 +170,16 @@ fn inherit_names_from_attr(attr: &ast::Attr) -> Vec<String> {
 }
 
 fn raw_template_data_from_ast(tmpl: &ast::TemplateDef) -> (TemplateData, Vec<String>) {
-    let steps = tmpl
-        .body()
-        .map_or_else(Vec::new, |b| collect_template_steps(&b));
+    let steps = if let Some(inline) = tmpl.inline_body() {
+        let step_name = tmpl.name().map_or_else(String::new, |n| n.to_string());
+        inline
+            .shell_text()
+            .map(|s| vec![(step_name, dedent(&s))])
+            .unwrap_or_default()
+    } else {
+        tmpl.body()
+            .map_or_else(Vec::new, |b| collect_template_steps(&b))
+    };
     let mut image = None;
     let mut needs = Vec::new();
     let mut inherit_names = Vec::new();

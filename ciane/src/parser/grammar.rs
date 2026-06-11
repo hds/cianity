@@ -241,7 +241,9 @@ fn template_def(p: &mut Parser<'_>) {
     if p.at(SyntaxKind::LParen) {
         attr_list_body(p);
     }
-    if p.at(SyntaxKind::LBracket) {
+    if p.at(SyntaxKind::LBrace) {
+        job_body_inline(p);
+    } else if p.at(SyntaxKind::LBracket) {
         job_body_steps(p);
     }
     if p.at(SyntaxKind::Arrow) {

@@ -611,18 +611,50 @@ workflow ci {
 }
 
 #[test]
-fn error_template_brace_body_not_valid() {
-    assert_has_error(
+fn template_inline_body() {
+    assert_no_errors(
         r"
 workflow ci {
     stage build {
-        template base {
-            step compile { cargo build }
-        }
+        template setup { rustup update }
+
+        job compile ( inherit = setup ) [
+            step setup,
+            step build { cargo build }
+        ]
     }
 }
 ",
-        "expected `job` or `template`",
+    );
+}
+
+#[test]
+fn top_level_template_inline_body() {
+    assert_no_errors(
+        r"
+workflow ci {
+    template common { echo hello }
+
+    stage build {
+        job compile ( inherit = common ) [ steps, ]
+    }
+}
+",
+    );
+}
+
+#[test]
+fn template_inline_body_with_attrs() {
+    assert_no_errors(
+        r"
+workflow ci {
+    stage build {
+        template setup ( image = rust:latest ) { rustup update }
+
+        job compile ( inherit = setup ) [ steps, ]
+    }
+}
+",
     );
 }
 

@@ -232,7 +232,10 @@ impl Printer {
         if let Some(attrs) = tmpl.attr_list() {
             self.print_attr_list(&attrs);
         }
-        if let Some(body) = tmpl.body() {
+        if let Some(body) = tmpl.inline_body() {
+            self.push(' ');
+            self.print_job_body_inline(&body);
+        } else if let Some(body) = tmpl.body() {
             self.push(' ');
             self.print_job_body_steps(&body);
         }

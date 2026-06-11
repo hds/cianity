@@ -1,0 +1,10 @@
+workflow ci {
+    stage build {
+        template setup { rustup update }
+
+        job compile ( inherit = setup ) [
+            step setup,
+            step build { cargo build }
+        ]
+    }
+}
