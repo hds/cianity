@@ -74,7 +74,4 @@ check:
   script:
     - ./target/release/cianity check
     - ./target/release/cianity format --check
-    - |
-      ./target/release/cianity build -t gitlab
-      # TODO: fix this after implementing build --check
-      [ "$(git diff --name-only)" == "" ] || ( echo "error: pipeline doesn't match workflow.ci!"; exit 1 )
+    - ./target/release/cianity build -t gitlab --check

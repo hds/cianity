@@ -58,6 +58,15 @@ To specify a different output file, use the `-o` flag.
 cianity build -t gitlab -o main.gitlab-ci.yml
 ```
 
+In order to check that the built pipeline is up to date with the ciane workflow, the `--check` flag
+can be used. It is recommended that this is used on CI to make sure that both checked in files
+match.
+
+```sh
+cianity build -t gitlab -o main.gitlab-ci.yml --check
+```
+
+
 ## LSP
 
 Cianity comes with a built in LSP, just like a grown up programming language.

@@ -44,10 +44,6 @@ stage cianity_check {
     ) [
         step check { ./target/release/cianity check }
         step format { ./target/release/cianity format --check }
-        step build {
-            ./target/release/cianity build -t gitlab
-            # TODO: fix this after implementing build --check
-            [ "$(git diff --name-only)" == "" ] || ( echo "error: pipeline doesn't match workflow.ci!"; exit 1 )
-        }
+        step build { ./target/release/cianity build -t gitlab --check }
     ]
 }

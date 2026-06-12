@@ -10,6 +10,7 @@ pub fn build(
     target: Target,
     output: Option<&Path>,
     workspace: Option<&Path>,
+    check: bool,
 ) -> anyhow::Result<()> {
     let core_target = match target {
         Target::Gitlab => cianity_core::build::Target::Gitlab,
@@ -35,8 +36,13 @@ pub fn build(
         anyhow::bail!("one or more files had errors");
     }
 
-    let out_path = cianity_core::build::run(&root, core_target, output)?;
-    println!("wrote {}", out_path.display());
+    if check {
+        let out_path = cianity_core::build::check(&root, core_target, output)?;
+        println!("{} is up to date", out_path.display());
+    } else {
+        let out_path = cianity_core::build::run(&root, core_target, output)?;
+        println!("wrote {}", out_path.display());
+    }
     Ok(())
 }
 

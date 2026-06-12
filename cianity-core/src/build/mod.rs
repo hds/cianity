@@ -24,6 +24,22 @@ pub fn run(path: &Path, target: Target, output: Option<&Path>) -> anyhow::Result
     }
 }
 
+/// Render a `ciane` source file and compare the result against the existing
+/// output file without writing anything.
+///
+/// Returns the path that would be written to. Fails if the rendered output
+/// differs from the existing file.
+///
+/// # Errors
+///
+/// Returns `Err` if the source cannot be read or rendered, the output file
+/// cannot be read, or the rendered output differs from the existing file.
+pub fn check(path: &Path, target: Target, output: Option<&Path>) -> anyhow::Result<PathBuf> {
+    match target {
+        Target::Gitlab => gitlab::check(path, output),
+    }
+}
+
 /// Render a `ciane` source string into a CI-system configuration string
 /// without any file I/O.
 ///

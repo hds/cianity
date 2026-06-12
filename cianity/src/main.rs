@@ -38,6 +38,9 @@ enum Command {
         /// Force workspace root to this directory instead of discovering it.
         #[arg(short = 'w', long, conflicts_with = "file")]
         workspace: Option<PathBuf>,
+        /// Check that the output file is up to date without writing anything.
+        #[arg(long)]
+        check: bool,
     },
     /// Format one or more ciane workflow files.
     Format {
@@ -80,11 +83,13 @@ fn main() -> ExitCode {
             target,
             output,
             workspace,
+            check,
         } => commands::build(
             file.as_deref(),
             target,
             output.as_deref(),
             workspace.as_deref(),
+            check,
         ),
         Command::Format {
             files,

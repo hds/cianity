@@ -2,6 +2,8 @@ use std::collections::HashSet;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
+use similar::{ChangeTag, TextDiff};
+
 use ciane::{
     ast::{AstNode, Root},
     error::Severity,
@@ -90,6 +92,64 @@ pub(super) fn run(path: &Path, output: Option<&Path>) -> anyhow::Result<PathBuf>
         .map_err(|e| anyhow::anyhow!("cannot write {}: {e}", out_path.display()))?;
 
     Ok(out_path)
+}
+
+/// Render a `ciane` source file and compare the result against the existing
+/// output file without writing anything.
+///
+/// # Errors
+///
+/// Returns `Err` if the source cannot be read or rendered, the output file
+/// cannot be read, or the rendered output differs from the existing file.
+pub(super) fn check(path: &Path, output: Option<&Path>) -> anyhow::Result<PathBuf> {
+    let yaml =
+        render_path(path).map_err(|e| anyhow::anyhow!("cannot build {}: {e}", path.display()))?;
+
+    let out_path = output.map_or_else(|| path.with_file_name(".gitlab-ci.yml"), Path::to_path_buf);
+    let existing = std::fs::read_to_string(&out_path)
+        .map_err(|e| anyhow::anyhow!("cannot read {}: {e}", out_path.display()))?;
+
+    if yaml != existing {
+        print_diff(&out_path, &existing, &yaml);
+        anyhow::bail!("{} is out of date", out_path.display());
+    }
+
+    Ok(out_path)
+}
+
+fn print_diff(out_path: &Path, existing: &str, generated: &str) {
+    let diff = TextDiff::from_lines(existing, generated);
+
+    eprintln!("\x1b[1m--- {}\x1b[0m", out_path.display());
+    eprintln!("\x1b[1m+++ (generated)\x1b[0m");
+
+    for group in diff.grouped_ops(3) {
+        let first = group
+            .first()
+            .expect("grouped_ops never yields empty groups");
+        let last = group.last().expect("grouped_ops never yields empty groups");
+        eprintln!(
+            "\x1b[36m@@ -{},{} +{},{} @@\x1b[0m",
+            first.old_range().start + 1,
+            last.old_range().end - first.old_range().start,
+            first.new_range().start + 1,
+            last.new_range().end - first.new_range().start,
+        );
+
+        for op in &group {
+            for change in diff.iter_changes(op) {
+                match change.tag() {
+                    ChangeTag::Delete => eprint!("\x1b[31m-{}\x1b[0m", change.value()),
+                    ChangeTag::Insert => eprint!("\x1b[32m+{}\x1b[0m", change.value()),
+                    ChangeTag::Equal => eprint!(" {}", change.value()),
+                }
+                if change.missing_newline() {
+                    eprintln!();
+                    eprintln!("\\ No newline at end of file");
+                }
+            }
+        }
+    }
 }
 
 fn render(workflow: &Workflow) -> String {
