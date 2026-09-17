@@ -263,10 +263,16 @@ impl RefList {
 // ─── Ref ─────────────────────────────────────────────────────────────────────
 
 impl Ref {
-    /// The full text of the reference (e.g. `build.build_debug`).
+    /// The full text of the reference (e.g. `build.build_debug`), excluding
+    /// any trivia (such as whitespace before a closing `]`).
     #[must_use]
     pub fn text(&self) -> String {
-        self.0.text().to_string()
+        self.0
+            .children_with_tokens()
+            .filter_map(rowan::NodeOrToken::into_token)
+            .filter(|t| !t.kind().is_trivia())
+            .map(|t| t.text().to_owned())
+            .collect()
     }
 }
 

@@ -161,6 +161,29 @@ workflow ci {
 }
 
 #[test]
+fn valid_inherit_list_with_spaces() {
+    assert_no_diagnostics(
+        r"
+workflow ci {
+    stage test {
+        template base [
+            step run { cargo test }
+        ]
+
+        template extra [
+            step lint { cargo clippy }
+        ]
+
+        job full ( inherit = [ base, extra ] ) [
+            steps,
+        ]
+    }
+}
+",
+    );
+}
+
+#[test]
 fn valid_inherit_cross_workflow_ref() {
     assert_no_diagnostics(
         r"

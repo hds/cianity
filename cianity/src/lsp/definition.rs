@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use ciane::{
-    ast::{AstNode, Attr, AttrValue, HasName, Root, Stage, UseDecl},
+    ast::{AstNode, Attr, AttrValue, HasName, Ref, Root, Stage, UseDecl},
     parse,
     parser::Parse,
     syntax::{SyntaxKind, SyntaxNode, SyntaxToken},
@@ -99,7 +99,7 @@ fn resolve_dependency(
     if attr.key_text().as_deref() != Some("dependencies") {
         return None;
     }
-    let ref_text = ref_node.text().to_string();
+    let ref_text = Ref::cast(ref_node)?.text();
     let (stage_name, job_name) = ref_text.split_once('.')?;
     let stage = root
         .stages()

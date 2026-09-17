@@ -423,6 +423,26 @@ fn definition_dependency_ref_resolves_to_job() {
 }
 
 #[test]
+fn definition_dependency_ref_with_spaces_resolves_to_job() {
+    let src = "workflow w {\n    stage build { job compile {} }\n    stage test { job unit ( dependencies = [ build.compile ] ) {} }\n}";
+    let parsed = parse(src);
+    let uri = dummy_uri();
+    let loc = definition::resolve(
+        &parsed,
+        src,
+        nth_offset(src, "compile", 2),
+        Path::new("/tmp/test.ci"),
+        &uri,
+    )
+    .expect("expected a definition for dependency");
+    assert_eq!(loc.uri, uri);
+    assert_eq!(
+        loc.range.start.line, 1,
+        "job 'compile' is declared on line 1"
+    );
+}
+
+#[test]
 fn definition_stage_keyword_returns_none() {
     let src = "workflow w { stage s {} }";
     let parsed = parse(src);

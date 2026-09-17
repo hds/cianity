@@ -25,6 +25,7 @@
 //! | `top_level_template_inherit` | job inherits from a top-level template defined outside any stage |
 //! | `cross_file_stage_template` | `ns/stage.tmpl` syntax resolves a template inside a named stage in another file |
 //! | `template_deps_inherit` | template `dependencies` attr propagates to inheriting job; job `dependencies` overrides template |
+//! | `multi_inherit_spaced` | formatter-style `inherit = [ a, b ]` list; whitespace before `]` doesn't break the last template name |
 //! | `artifacts_basic` | `artifacts` list with globs on a job; paths appear in `artifacts.paths:` |
 //! | `artifacts_from_template` | template return annotation artifacts propagate to inheriting job |
 //! | `artifacts_merged` | template and job both declare artifacts; all paths appear in the output |
@@ -157,6 +158,11 @@ fn build_template_inherit() {
 #[test]
 fn build_multi_inherit() {
     assert_gitlab_snapshot("multi_inherit");
+}
+
+#[test]
+fn build_multi_inherit_spaced() {
+    assert_gitlab_snapshot("multi_inherit_spaced");
 }
 
 #[test]
