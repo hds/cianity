@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use rowan::NodeOrToken;
 use smol_str::SmolStr;
 
 use crate::{
@@ -86,6 +87,7 @@ fn check_workflow_def(workflow: &WorkflowDef, diagnostics: &mut Vec<Diagnostic>)
     let root_template_names: HashSet<SmolStr> = body.templates().filter_map(|t| t.name()).collect();
     for tmpl in body.templates() {
         check_unknown_attrs(&tmpl, "template", VALID_TEMPLATE_ATTRS, diagnostics);
+        check_dependencies_attr(&tmpl, diagnostics);
         check_template_inherit(&tmpl, &root_template_names, diagnostics);
     }
     for stage in body.stages() {
@@ -152,6 +154,7 @@ fn check_stage(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     check_unknown_attrs(stage, "stage", VALID_STAGE_ATTRS, diagnostics);
+    check_dependencies_attr(stage, diagnostics);
 
     let Some(body) = stage.body() else {
         return;
@@ -178,6 +181,7 @@ fn check_stage(
             });
         }
         check_unknown_attrs(&job, "job", VALID_JOB_ATTRS, diagnostics);
+        check_dependencies_attr(&job, diagnostics);
         check_job_steps(&job, &all_template_names, diagnostics);
     }
     for tmpl in body.templates() {
@@ -191,7 +195,48 @@ fn check_stage(
             });
         }
         check_unknown_attrs(&tmpl, "template", VALID_TEMPLATE_ATTRS, diagnostics);
+        check_dependencies_attr(&tmpl, diagnostics);
         check_template_inherit(&tmpl, &all_template_names, diagnostics);
+    }
+}
+
+/// Check that a `dependencies` attribute is a list of `stage.job` references.
+///
+/// Whether the referenced jobs exist can only be known once templates have
+/// been resolved, so that's checked when the workflow is lowered.
+fn check_dependencies_attr<N: HasAttrList>(node: &N, diagnostics: &mut Vec<Diagnostic>) {
+    let Some(al) = node.attr_list() else {
+        return;
+    };
+    for attr in al.attrs() {
+        if attr.key_text().as_deref() != Some("dependencies") {
+            continue;
+        }
+        let Some(value) = attr.value() else {
+            continue;
+        };
+        let Some(ref_list) = value.ref_list() else {
+            // A missing value is already reported as a parse error.
+            if value.bare_text().is_some() {
+                diagnostics.push(Diagnostic {
+                    severity: Severity::Error,
+                    message: "`dependencies` must be a list of jobs, e.g. `[ stage.job ]`"
+                        .to_owned(),
+                    span: span_of(attr.syntax()),
+                });
+            }
+            continue;
+        };
+        for dep in ref_list.refs() {
+            let text = dep.text();
+            if text.contains('/') || text.split('.').count() != 2 {
+                diagnostics.push(Diagnostic {
+                    severity: Severity::Error,
+                    message: format!("dependency `{text}` must be written as `stage.job`"),
+                    span: span_without_trivia(dep.syntax()),
+                });
+            }
+        }
     }
 }
 
@@ -281,4 +326,21 @@ fn check_use_decl_attrs(decl: &UseDecl, diagnostics: &mut Vec<Diagnostic>) {
 fn span_of(node: &crate::syntax::SyntaxNode) -> std::ops::Range<usize> {
     let range = node.text_range();
     usize::from(range.start())..usize::from(range.end())
+}
+
+/// The span of `node`, excluding any leading or trailing trivia.
+fn span_without_trivia(node: &crate::syntax::SyntaxNode) -> std::ops::Range<usize> {
+    let mut tokens = node
+        .descendants_with_tokens()
+        .filter_map(NodeOrToken::into_token)
+        .filter(|t| !t.kind().is_trivia());
+    let Some(first) = tokens.next() else {
+        return span_of(node);
+    };
+    let end = tokens
+        .last()
+        .unwrap_or_else(|| first.clone())
+        .text_range()
+        .end();
+    usize::from(first.text_range().start())..usize::from(end)
 }

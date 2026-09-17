@@ -142,6 +142,26 @@ fn invalid_dependency_later_stage_from_template() {
 }
 
 #[test]
+fn invalid_dependency_unknown_stage() {
+    assert_check_fails("dependency_unknown_stage");
+}
+
+#[test]
+fn invalid_dependency_unknown_job() {
+    assert_check_fails("dependency_unknown_job");
+}
+
+#[test]
+fn invalid_dependency_missing_stage_prefix() {
+    assert_check_fails("dependency_missing_stage_prefix");
+}
+
+#[test]
+fn invalid_dependencies_not_a_list() {
+    assert_check_fails("dependencies_not_a_list");
+}
+
+#[test]
 fn invalid_dependency_on_self() {
     assert_check_fails("dependency_on_self");
 }

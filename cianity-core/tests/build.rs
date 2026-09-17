@@ -285,6 +285,66 @@ fn build_fails_on_inherited_dependency_in_later_stage() {
 }
 
 #[test]
+fn build_fails_on_dependency_on_unknown_stage() {
+    assert_dependency_error(
+        "workflow ci {
+            stage build { job compile { cargo build } }
+            stage test { job unit (dependencies = [biuld.compile]) { cargo test } }
+        }",
+        "job `test.unit` depends on `biuld.compile`, but there is no stage `biuld`",
+    );
+}
+
+#[test]
+fn build_fails_on_dependency_on_unknown_job() {
+    assert_dependency_error(
+        "workflow ci {
+            stage build { job compile { cargo build } }
+            stage test { job unit (dependencies = [build.compiel]) { cargo test } }
+        }",
+        "job `test.unit` depends on `build.compiel`, but stage `build` has no job `compiel`",
+    );
+}
+
+#[test]
+fn build_fails_on_inherited_dependency_on_unknown_job() {
+    assert_dependency_error(
+        "workflow ci {
+            template needs_build (dependencies = [build.compiel])
+            stage build { job compile { cargo build } }
+            stage test { job unit (inherit = needs_build) { cargo test } }
+        }",
+        "job `test.unit` depends on `build.compiel`, but stage `build` has no job `compiel`",
+    );
+}
+
+#[test]
+fn build_fails_on_dependency_missing_stage_prefix() {
+    assert_dependency_error(
+        "workflow ci {
+            stage build {
+                job compile { cargo build }
+                job lint (dependencies = [compile]) { cargo clippy }
+            }
+        }",
+        "dependency `compile` must be written as `stage.job`",
+    );
+}
+
+#[test]
+fn build_fails_on_dependencies_not_a_list() {
+    assert_dependency_error(
+        "workflow ci {
+            stage build {
+                job compile { cargo build }
+                job lint (dependencies = build.compile) { cargo clippy }
+            }
+        }",
+        "`dependencies` must be a list of jobs",
+    );
+}
+
+#[test]
 fn build_fails_on_self_dependency() {
     assert_dependency_error(
         "workflow ci { stage build { job compile (dependencies = [build.compile]) { cargo build } } }",

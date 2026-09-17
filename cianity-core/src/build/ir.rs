@@ -90,8 +90,9 @@ pub struct JobRef {
     pub job: String,
 }
 
-/// A job dependency that can't be satisfied: on itself, on a job in a later
-/// stage, or part of a cycle between jobs in the same stage.
+/// A job dependency that can't be satisfied: on itself, on a job that doesn't
+/// exist, on a job in a later stage, or part of a cycle between jobs in the
+/// same stage.
 #[derive(Debug)]
 pub struct DependencyError {
     /// Stage of the job that declares (or inherits) the dependency.
@@ -104,8 +105,8 @@ pub struct DependencyError {
 /// Find all dependencies in `workflow` which can't be satisfied.
 ///
 /// Dependencies are checked on the lowered workflow so that those inherited
-/// from templates are included. References to jobs that don't exist are not
-/// reported here.
+/// from templates are included. References which aren't in `stage.job` form
+/// never reach the IR; they're reported by `ciane` validation.
 #[must_use]
 pub fn dependency_errors(workflow: &Workflow) -> Vec<DependencyError> {
     let mut errors = Vec::new();
@@ -113,14 +114,27 @@ pub fn dependency_errors(workflow: &Workflow) -> Vec<DependencyError> {
     for (stage_idx, stage) in workflow.stages.iter().enumerate() {
         for job in &stage.jobs {
             for dep in &job.needs {
+                let dep_stage_idx = workflow.stages.iter().position(|s| s.name == dep.stage);
                 let message = if dep.stage == job.stage && dep.job == job.name {
                     format!("job `{}` depends on itself", job.full_name())
-                } else if workflow
-                    .stages
-                    .iter()
-                    .position(|s| s.name == dep.stage)
-                    .is_some_and(|dep_idx| dep_idx > stage_idx)
-                {
+                } else if dep_stage_idx.is_none() {
+                    format!(
+                        "job `{}` depends on `{}.{}`, but there is no stage `{}`",
+                        job.full_name(),
+                        dep.stage,
+                        dep.job,
+                        dep.stage
+                    )
+                } else if workflow.job(&dep.stage, &dep.job).is_none() {
+                    format!(
+                        "job `{}` depends on `{}.{}`, but stage `{}` has no job `{}`",
+                        job.full_name(),
+                        dep.stage,
+                        dep.job,
+                        dep.stage,
+                        dep.job
+                    )
+                } else if dep_stage_idx.is_some_and(|dep_idx| dep_idx > stage_idx) {
                     format!(
                         "job `{}` depends on `{}.{}` in later stage `{}`; dependencies must be \
                          on jobs in the same or an earlier stage",

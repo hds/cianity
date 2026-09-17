@@ -517,6 +517,110 @@ workflow ci (foo = bar) {
 }
 
 #[test]
+fn valid_qualified_dependencies() {
+    assert_no_diagnostics(
+        r"
+workflow ci {
+    template needs_build ( dependencies = [ build.compile ] )
+
+    stage build {
+        job compile { cargo build }
+
+        job lint ( dependencies = [ build.compile ] ) { cargo clippy }
+    }
+
+    stage test {
+        job unit ( dependencies = [build.compile, build.lint] ) { cargo test }
+    }
+}
+",
+    );
+}
+
+#[test]
+fn error_dependency_missing_stage_prefix() {
+    assert_has_diagnostic(
+        r"
+workflow ci {
+    stage build {
+        job compile { cargo build }
+
+        job lint ( dependencies = [ compile ] ) { cargo clippy }
+    }
+}
+",
+        Severity::Error,
+        "dependency `compile` must be written as `stage.job`",
+    );
+}
+
+#[test]
+fn error_template_dependency_missing_stage_prefix() {
+    assert_has_diagnostic(
+        r"
+workflow ci {
+    template needs_build ( dependencies = [ compile ] )
+
+    stage build {
+        job compile { cargo build }
+    }
+}
+",
+        Severity::Error,
+        "dependency `compile` must be written as `stage.job`",
+    );
+}
+
+#[test]
+fn error_dependency_with_too_many_parts() {
+    assert_has_diagnostic(
+        r"
+workflow ci {
+    stage build {
+        job compile { cargo build }
+
+        job lint ( dependencies = [ build.compile.extra ] ) { cargo clippy }
+    }
+}
+",
+        Severity::Error,
+        "dependency `build.compile.extra` must be written as `stage.job`",
+    );
+}
+
+#[test]
+fn error_dependency_with_workflow_prefix() {
+    assert_has_diagnostic(
+        r"
+workflow ci {
+    stage build {
+        job lint ( dependencies = [ other/build.compile ] ) { cargo clippy }
+    }
+}
+",
+        Severity::Error,
+        "dependency `other/build.compile` must be written as `stage.job`",
+    );
+}
+
+#[test]
+fn error_dependencies_not_a_list() {
+    assert_has_diagnostic(
+        r"
+workflow ci {
+    stage build {
+        job compile { cargo build }
+
+        job lint ( dependencies = build.compile ) { cargo clippy }
+    }
+}
+",
+        Severity::Error,
+        "`dependencies` must be a list of jobs, e.g. `[ stage.job ]`",
+    );
+}
+
+#[test]
 fn error_unknown_stage_attr() {
     assert_has_diagnostic(
         r"

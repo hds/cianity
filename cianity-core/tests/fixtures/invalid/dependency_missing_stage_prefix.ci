@@ -1,0 +1,9 @@
+workflow ci {
+    stage build {
+        job compile { cargo build }
+    }
+
+    stage test {
+        job unit ( dependencies = [ compile ] ) { cargo test }
+    }
+}
