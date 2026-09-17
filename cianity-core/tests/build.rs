@@ -252,6 +252,51 @@ fn build_fails_on_unknown_job_attr() {
     );
 }
 
+#[test]
+fn build_reports_validation_and_dependency_errors_together() {
+    let err = build::render_to_string(
+        "workflow ci {
+            stage build {
+                job compile (foo = bar) { cargo build }
+                job lint (dependencies = [compile, build.compiel]) { cargo clippy }
+            }
+        }",
+        build::Target::Gitlab,
+    )
+    .expect_err("a file with errors should not produce output")
+    .to_string();
+    for needle in [
+        "unknown attribute `foo` on job",
+        "dependency `compile` must be written as `stage.job`",
+        "job `build.lint` depends on `build.compiel`, but stage `build` has no job `compiel`",
+    ] {
+        assert!(err.contains(needle), "expected {needle:?} in: {err}");
+    }
+}
+
+#[test]
+fn build_reports_all_errors_from_file_together() {
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/invalid/multiple_errors.ci");
+    let err = build::render_path_to_string(&path, build::Target::Gitlab)
+        .expect_err("a file with errors should not produce output")
+        .to_string();
+    for needle in [
+        "unknown attribute `foo` on job",
+        "dependency `compile` must be written as `stage.job`",
+        "dependency `build.compile.extra` must be written as `stage.job`",
+        "unknown import `missing`",
+        "job `build.lint` depends on `build.compiel`, but stage `build` has no job `compiel`",
+        "job `build.lint` depends on `test.unit` in later stage `test`",
+    ] {
+        assert_eq!(
+            err.matches(needle).count(),
+            1,
+            "expected exactly one {needle:?} in: {err}"
+        );
+    }
+}
+
 fn assert_dependency_error(source: &str, expected: &str) {
     let err = build::render_to_string(source, build::Target::Gitlab)
         .expect_err("a file with an invalid dependency should not produce output");

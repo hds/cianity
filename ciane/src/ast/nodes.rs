@@ -274,6 +274,17 @@ impl Ref {
             .map(|t| t.text().to_owned())
             .collect()
     }
+
+    /// The stage and job names, if this reference is in `stage.job` form.
+    #[must_use]
+    pub fn stage_job(&self) -> Option<(String, String)> {
+        let text = self.text();
+        let (stage, job) = text.split_once('.')?;
+        if stage.is_empty() || job.is_empty() || job.contains('.') || text.contains('/') {
+            return None;
+        }
+        Some((stage.to_owned(), job.to_owned()))
+    }
 }
 
 // ─── PathList ─────────────────────────────────────────────────────────────────

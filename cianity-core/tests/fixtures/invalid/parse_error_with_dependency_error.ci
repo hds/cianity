@@ -1,0 +1,7 @@
+workflow ci {
+    stage build {
+        job { cargo build }
+
+        job lint ( dependencies = [ build.compile ] ) { cargo clippy }
+    }
+}

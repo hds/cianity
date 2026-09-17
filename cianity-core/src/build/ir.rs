@@ -577,6 +577,22 @@ pub fn lower(root: &Root) -> Workflow {
 /// Returns `Err` if a referenced import file cannot be read, or if the named
 /// template is not found in that file.
 pub fn lower_with_path(root: &Root, path: &Path) -> anyhow::Result<Workflow> {
+    let (workflow, errors) = lower_with_path_partial(root, path);
+    match errors.into_iter().next() {
+        Some(err) => Err(err),
+        None => Ok(workflow),
+    }
+}
+
+/// Lower a parsed `Root` into a `Workflow` like [`lower_with_path`], but
+/// without stopping at cross-file templates which can't be resolved.
+///
+/// Each such template contributes nothing to the jobs inheriting from it, and
+/// the reason it couldn't be resolved is returned alongside the workflow. This
+/// allows the rest of the workflow to be checked in the same pass.
+#[must_use]
+pub fn lower_with_path_partial(root: &Root, path: &Path) -> (Workflow, Vec<anyhow::Error>) {
+    let mut errors = Vec::new();
     let strategy = strategy_from_root(root);
     let base = path.parent().unwrap_or(Path::new("."));
     let import_map = build_import_map(root, base);
@@ -607,14 +623,20 @@ pub fn lower_with_path(root: &Root, path: &Path) -> anyhow::Result<Workflow> {
             let mut template_data = TemplateData::default();
             for name in &inherit_names {
                 let td = if let Some((import_name, template_ref)) = name.split_once('/') {
-                    let file_path = import_map
+                    import_map
                         .get(import_name)
-                        .ok_or_else(|| anyhow::anyhow!("unknown import `{import_name}`"))?;
-                    if let Some((sname, tname)) = template_ref.split_once('.') {
-                        load_cross_file_stage_template(file_path, sname, tname)?
-                    } else {
-                        load_cross_file_top_level_template(file_path, template_ref)?
-                    }
+                        .ok_or_else(|| anyhow::anyhow!("unknown import `{import_name}`"))
+                        .and_then(|file_path| {
+                            if let Some((sname, tname)) = template_ref.split_once('.') {
+                                load_cross_file_stage_template(file_path, sname, tname)
+                            } else {
+                                load_cross_file_top_level_template(file_path, template_ref)
+                            }
+                        })
+                        .unwrap_or_else(|err| {
+                            errors.push(err);
+                            TemplateData::default()
+                        })
                 } else {
                     stage_templates
                         .get(name)
@@ -663,7 +685,7 @@ pub fn lower_with_path(root: &Root, path: &Path) -> anyhow::Result<Workflow> {
         });
     }
 
-    Ok(Workflow { stages, strategy })
+    (Workflow { stages, strategy }, errors)
 }
 
 struct JobAttrs {
@@ -752,17 +774,18 @@ fn parse_job_attrs(job: &ast::Job) -> JobAttrs {
     }
 }
 
+/// Job references from a `dependencies` value.
+///
+/// References that aren't in `stage.job` form are skipped; they're reported by
+/// `ciane` validation, and resolving them here would report them a second
+/// time as missing jobs.
 fn refs_from_attr_value(val: &ast::AttrValue) -> Vec<JobRef> {
     val.ref_list()
         .map(|rl| {
             rl.refs()
                 .filter_map(|r| {
-                    let text = r.text();
-                    let (s, j) = text.trim().split_once('.')?;
-                    Some(JobRef {
-                        stage: s.to_string(),
-                        job: j.to_string(),
-                    })
+                    let (stage, job) = r.stage_job()?;
+                    Some(JobRef { stage, job })
                 })
                 .collect()
         })

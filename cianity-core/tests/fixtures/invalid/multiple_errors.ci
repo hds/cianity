@@ -1,0 +1,14 @@
+workflow ci {
+    stage build {
+        job compile ( foo = bar ) { cargo build }
+
+        job lint (
+            inherit = missing/base,
+            dependencies = [ compile, build.compile.extra, build.compiel, test.unit ],
+        ) { cargo clippy }
+    }
+
+    stage test {
+        job unit { cargo test }
+    }
+}

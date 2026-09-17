@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use ciane::error::Severity;
 use cianity_core::{check, workspace};
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -169,6 +170,56 @@ fn invalid_dependency_on_self() {
 #[test]
 fn invalid_dependency_cycle() {
     assert_check_fails("dependency_cycle");
+}
+
+// ── reporting all errors at once ──────────────────────────────────────────────
+
+/// Messages of all error-level diagnostics for an invalid fixture.
+fn error_messages(name: &str) -> Vec<String> {
+    let path = fixture_path("invalid", name);
+    check::diagnostics(&path)
+        .unwrap_or_else(|e| panic!("cannot check {name}.ci: {e}"))
+        .into_iter()
+        .filter(|d| d.severity == Severity::Error)
+        .map(|d| d.message)
+        .collect()
+}
+
+#[test]
+fn reports_all_errors_in_one_run() {
+    let messages = error_messages("multiple_errors");
+    let expected = [
+        "unknown attribute `foo` on job",
+        "dependency `compile` must be written as `stage.job`",
+        "dependency `build.compile.extra` must be written as `stage.job`",
+        "inherit references import `missing`, but no such import exists",
+        "job `build.lint` depends on `build.compiel`, but stage `build` has no job `compiel`",
+        "job `build.lint` depends on `test.unit` in later stage `test`",
+    ];
+    for needle in expected {
+        let count = messages.iter().filter(|m| m.contains(needle)).count();
+        assert_eq!(
+            count, 1,
+            "expected exactly one error containing {needle:?}, got: {messages:#?}"
+        );
+    }
+    assert_eq!(
+        messages.len(),
+        expected.len(),
+        "unexpected extra errors: {messages:#?}"
+    );
+}
+
+#[test]
+fn parse_errors_suppress_dependency_errors() {
+    // Error recovery can drop jobs from the tree, so dependency checks on a
+    // file with parse errors could report jobs as missing when they aren't.
+    let messages = error_messages("parse_error_with_dependency_error");
+    assert!(!messages.is_empty(), "expected parse errors, got none");
+    assert!(
+        messages.iter().all(|m| !m.contains("depends on")),
+        "dependency errors should not be reported alongside parse errors: {messages:#?}"
+    );
 }
 
 // ── workspace check ───────────────────────────────────────────────────────────

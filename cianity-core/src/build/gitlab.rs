@@ -19,29 +19,9 @@ use super::ir::{self, Job, JobRef, Workflow, WorkflowStrategy};
 ///
 /// Returns `Err` if the source has parse errors.
 pub(super) fn render_source(source: &str) -> anyhow::Result<String> {
-    let result = parse(source);
-    if !result.errors().is_empty() {
-        anyhow::bail!("file has parse errors");
-    }
-
-    let root = Root::cast(result.syntax())
-        .ok_or_else(|| anyhow::anyhow!("internal error: parse produced no Root node"))?;
-
-    let errors: Vec<_> = validate(&root)
-        .into_iter()
-        .filter(|d| d.severity == Severity::Error)
-        .collect();
-    if !errors.is_empty() {
-        let msgs = errors
-            .iter()
-            .map(|e| e.message.as_str())
-            .collect::<Vec<_>>()
-            .join("; ");
-        anyhow::bail!("file has validation errors: {msgs}");
-    }
-
+    let root = parse_root(source)?;
     let workflow = ir::lower(&root);
-    ensure_valid_dependencies(&workflow)?;
+    ensure_no_errors(&root, &workflow, &[])?;
     Ok(render(&workflow))
 }
 
@@ -55,40 +35,41 @@ pub(super) fn render_source(source: &str) -> anyhow::Result<String> {
 pub(super) fn render_path(path: &Path) -> anyhow::Result<String> {
     let source =
         std::fs::read_to_string(path).map_err(|e| anyhow::anyhow!("cannot read file: {e}"))?;
-    let result = parse(&source);
-    if !result.errors().is_empty() {
-        anyhow::bail!("file has parse errors");
-    }
-    let root = Root::cast(result.syntax())
-        .ok_or_else(|| anyhow::anyhow!("internal error: parse produced no Root node"))?;
-
-    let errors: Vec<_> = validate(&root)
-        .into_iter()
-        .filter(|d| d.severity == Severity::Error)
-        .collect();
-    if !errors.is_empty() {
-        let msgs = errors
-            .iter()
-            .map(|e| e.message.as_str())
-            .collect::<Vec<_>>()
-            .join("; ");
-        anyhow::bail!("file has validation errors: {msgs}");
-    }
-
-    let workflow = ir::lower_with_path(&root, path)?;
-    ensure_valid_dependencies(&workflow)?;
+    let root = parse_root(&source)?;
+    let (workflow, lower_errors) = ir::lower_with_path_partial(&root, path);
+    ensure_no_errors(&root, &workflow, &lower_errors)?;
     Ok(render(&workflow))
 }
 
-fn ensure_valid_dependencies(workflow: &Workflow) -> anyhow::Result<()> {
-    let errors = ir::dependency_errors(workflow);
-    if !errors.is_empty() {
-        let msgs = errors
-            .iter()
-            .map(|e| e.message.as_str())
-            .collect::<Vec<_>>()
-            .join("; ");
-        anyhow::bail!("file has validation errors: {msgs}");
+fn parse_root(source: &str) -> anyhow::Result<Root> {
+    let result = parse(source);
+    if !result.errors().is_empty() {
+        anyhow::bail!("file has parse errors");
+    }
+    Root::cast(result.syntax())
+        .ok_or_else(|| anyhow::anyhow!("internal error: parse produced no Root node"))
+}
+
+/// Fail with every validation, template resolution, and dependency error at
+/// once, so they can all be fixed before building again.
+fn ensure_no_errors(
+    root: &Root,
+    workflow: &Workflow,
+    lower_errors: &[anyhow::Error],
+) -> anyhow::Result<()> {
+    let msgs: Vec<String> = validate(root)
+        .into_iter()
+        .filter(|d| d.severity == Severity::Error)
+        .map(|d| d.message)
+        .chain(lower_errors.iter().map(ToString::to_string))
+        .chain(
+            ir::dependency_errors(workflow)
+                .into_iter()
+                .map(|e| e.message),
+        )
+        .collect();
+    if !msgs.is_empty() {
+        anyhow::bail!("file has validation errors: {}", msgs.join("; "));
     }
     Ok(())
 }

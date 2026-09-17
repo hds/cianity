@@ -10,7 +10,7 @@ use ciane::{
     validation::validate,
 };
 
-use crate::build::ir::{dependency_errors, lower_with_path};
+use crate::build::ir::{dependency_errors, lower_with_path_partial};
 
 /// Read, parse, and validate a `ciane` source file.
 ///
@@ -22,37 +22,15 @@ use crate::build::ir::{dependency_errors, lower_with_path};
 /// Returns `Err` if the file cannot be read, or if any error-level diagnostic
 /// is produced during parsing or semantic validation.
 pub fn run(path: &Path) -> anyhow::Result<()> {
-    let source =
-        std::fs::read_to_string(path).map_err(|e| anyhow::anyhow!("cannot read file: {e}"))?;
+    let source = read_source(path)?;
     let filename = path.display().to_string();
 
-    let result = parse(&source);
     let mut has_error = false;
-
-    for err in result.errors() {
-        has_error = true;
-        print_diagnostic(
-            &filename,
-            &source,
-            &Diagnostic {
-                severity: Severity::Error,
-                message: err.message.clone(),
-                span: err.span.clone(),
-            },
-        );
-    }
-
-    if let Some(root) = Root::cast(result.syntax()) {
-        for diag in validate(&root) {
-            if diag.severity == Severity::Error {
-                has_error = true;
-            }
-            print_diagnostic(&filename, &source, &diag);
+    for diag in collect_diagnostics(path, &source) {
+        if diag.severity == Severity::Error {
+            has_error = true;
         }
-        check_cross_file_inherits(&root, path, &filename, &source, &mut has_error);
-        if !has_error {
-            check_dependencies(&root, path, &filename, &source, &mut has_error);
-        }
+        print_diagnostic(&filename, &source, &diag);
     }
 
     if has_error {
@@ -62,13 +40,47 @@ pub fn run(path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn check_cross_file_inherits(
-    root: &Root,
-    path: &Path,
-    filename: &str,
-    source: &str,
-    has_error: &mut bool,
-) {
+/// Read, parse, and validate a `ciane` source file, returning the diagnostics
+/// that [`run`] would print.
+///
+/// # Errors
+///
+/// Returns `Err` if the file cannot be read.
+pub fn diagnostics(path: &Path) -> anyhow::Result<Vec<Diagnostic>> {
+    let source = read_source(path)?;
+    Ok(collect_diagnostics(path, &source))
+}
+
+fn read_source(path: &Path) -> anyhow::Result<String> {
+    std::fs::read_to_string(path).map_err(|e| anyhow::anyhow!("cannot read file: {e}"))
+}
+
+fn collect_diagnostics(path: &Path, source: &str) -> Vec<Diagnostic> {
+    let result = parse(source);
+    let mut diagnostics: Vec<Diagnostic> = result
+        .errors()
+        .iter()
+        .map(|err| Diagnostic {
+            severity: Severity::Error,
+            message: err.message.clone(),
+            span: err.span.clone(),
+        })
+        .collect();
+
+    if let Some(root) = Root::cast(result.syntax()) {
+        diagnostics.extend(validate(&root));
+        check_cross_file_inherits(&root, path, &mut diagnostics);
+        // Error recovery can leave jobs out of the tree, which would make
+        // dependencies on them look like they refer to jobs that don't exist.
+        if result.errors().is_empty() {
+            check_dependencies(&root, path, &mut diagnostics);
+        }
+    }
+
+    diagnostics
+}
+
+fn check_cross_file_inherits(root: &Root, path: &Path, diagnostics: &mut Vec<Diagnostic>) {
     let base = path.parent().unwrap_or(Path::new("."));
     let imports = build_import_map(root, base);
 
@@ -102,65 +114,43 @@ fn check_cross_file_inherits(
                         match result {
                             Ok(true) => {}
                             Ok(false) => {
-                                *has_error = true;
-                                print_diagnostic(
-                                    filename,
-                                    source,
-                                    &Diagnostic {
-                                        severity: Severity::Error,
-                                        message: format!(
-                                            "template `{template_ref}` not found \
+                                diagnostics.push(Diagnostic {
+                                    severity: Severity::Error,
+                                    message: format!(
+                                        "template `{template_ref}` not found \
                                              in import `{import_name}`"
-                                        ),
-                                        span,
-                                    },
-                                );
+                                    ),
+                                    span,
+                                });
                             }
                             Err(e) => {
-                                *has_error = true;
-                                print_diagnostic(
-                                    filename,
-                                    source,
-                                    &Diagnostic {
-                                        severity: Severity::Error,
-                                        message: format!(
-                                            "failed to read import `{import_name}`: {e}"
-                                        ),
-                                        span,
-                                    },
-                                );
+                                diagnostics.push(Diagnostic {
+                                    severity: Severity::Error,
+                                    message: format!("failed to read import `{import_name}`: {e}"),
+                                    span,
+                                });
                             }
                         }
                     } else {
-                        *has_error = true;
-                        print_diagnostic(
-                            filename,
-                            source,
-                            &Diagnostic {
-                                severity: Severity::Error,
-                                message: format!(
-                                    "import `{import_name}` references `{}`, \
-                                     but that file does not exist",
-                                    file_path.display()
-                                ),
-                                span,
-                            },
-                        );
-                    }
-                } else {
-                    *has_error = true;
-                    print_diagnostic(
-                        filename,
-                        source,
-                        &Diagnostic {
+                        diagnostics.push(Diagnostic {
                             severity: Severity::Error,
                             message: format!(
-                                "inherit references import `{import_name}`, but no such \
-                                 import exists in the `use` block"
+                                "import `{import_name}` references `{}`, \
+                                     but that file does not exist",
+                                file_path.display()
                             ),
                             span,
-                        },
-                    );
+                        });
+                    }
+                } else {
+                    diagnostics.push(Diagnostic {
+                        severity: Severity::Error,
+                        message: format!(
+                            "inherit references import `{import_name}`, but no such \
+                                 import exists in the `use` block"
+                        ),
+                        span,
+                    });
                 }
             }
         }
@@ -170,29 +160,16 @@ fn check_cross_file_inherits(
 /// Report dependencies which can't be satisfied.
 ///
 /// Dependencies may be inherited from templates (including ones in other
-/// files), so they're checked on the lowered workflow. If lowering fails, the
-/// error is left for `build` to report.
-fn check_dependencies(
-    root: &Root,
-    path: &Path,
-    filename: &str,
-    source: &str,
-    has_error: &mut bool,
-) {
-    let Ok(workflow) = lower_with_path(root, path) else {
-        return;
-    };
+/// files), so they're checked on the lowered workflow. Cross-file templates
+/// which can't be resolved are reported by [`check_cross_file_inherits`].
+fn check_dependencies(root: &Root, path: &Path, diagnostics: &mut Vec<Diagnostic>) {
+    let (workflow, _) = lower_with_path_partial(root, path);
     for err in dependency_errors(&workflow) {
-        *has_error = true;
-        print_diagnostic(
-            filename,
-            source,
-            &Diagnostic {
-                severity: Severity::Error,
-                message: err.message,
-                span: job_dependency_span(root, &err.stage, &err.job),
-            },
-        );
+        diagnostics.push(Diagnostic {
+            severity: Severity::Error,
+            message: err.message,
+            span: job_dependency_span(root, &err.stage, &err.job),
+        });
     }
 }
 

@@ -228,11 +228,10 @@ fn check_dependencies_attr<N: HasAttrList>(node: &N, diagnostics: &mut Vec<Diagn
             continue;
         };
         for dep in ref_list.refs() {
-            let text = dep.text();
-            if text.contains('/') || text.split('.').count() != 2 {
+            if dep.stage_job().is_none() {
                 diagnostics.push(Diagnostic {
                     severity: Severity::Error,
-                    message: format!("dependency `{text}` must be written as `stage.job`"),
+                    message: format!("dependency `{}` must be written as `stage.job`", dep.text()),
                     span: span_without_trivia(dep.syntax()),
                 });
             }
