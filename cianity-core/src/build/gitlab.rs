@@ -40,7 +40,9 @@ pub(super) fn render_source(source: &str) -> anyhow::Result<String> {
         anyhow::bail!("file has validation errors: {msgs}");
     }
 
-    Ok(render(&ir::lower(&root)))
+    let workflow = ir::lower(&root);
+    ensure_valid_dependencies(&workflow)?;
+    Ok(render(&workflow))
 }
 
 /// Read a `ciane` source file and render it as a GitLab CI YAML string,
@@ -73,7 +75,22 @@ pub(super) fn render_path(path: &Path) -> anyhow::Result<String> {
         anyhow::bail!("file has validation errors: {msgs}");
     }
 
-    Ok(render(&ir::lower_with_path(&root, path)?))
+    let workflow = ir::lower_with_path(&root, path)?;
+    ensure_valid_dependencies(&workflow)?;
+    Ok(render(&workflow))
+}
+
+fn ensure_valid_dependencies(workflow: &Workflow) -> anyhow::Result<()> {
+    let errors = ir::dependency_errors(workflow);
+    if !errors.is_empty() {
+        let msgs = errors
+            .iter()
+            .map(|e| e.message.as_str())
+            .collect::<Vec<_>>()
+            .join("; ");
+        anyhow::bail!("file has validation errors: {msgs}");
+    }
+    Ok(())
 }
 
 /// Read a `ciane` source file and write an equivalent `.gitlab-ci.yml` to the
@@ -220,7 +237,17 @@ fn render_job(
     if job.needs.is_empty() {
         out.push_str("  dependencies: []\n");
     } else {
-        out.push_str("  dependencies:\n");
+        // GitLab's `dependencies` only selects which artifacts are downloaded;
+        // it doesn't order jobs within a stage, and it rejects jobs from the
+        // same stage. Those need `needs`, which must then list every
+        // dependency. A job with `needs` starts as soon as those jobs finish,
+        // but a chain of same-stage `needs` always ends at a job without
+        // them, which waits for all prior stages as usual.
+        if job.has_same_stage_dependency() {
+            out.push_str("  needs:\n");
+        } else {
+            out.push_str("  dependencies:\n");
+        }
         for need in &job.needs {
             let _ = writeln!(out, "    - {}", yaml_scalar(&dep_name(need, conflicts)));
         }

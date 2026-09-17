@@ -1,0 +1,5 @@
+workflow ci {
+    stage build {
+        job compile ( dependencies = [ build.compile ] ) { cargo build }
+    }
+}

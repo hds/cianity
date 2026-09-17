@@ -12,7 +12,7 @@ compile:
 lint:
   stage: build
   image: "rust:1.75"
-  dependencies:
+  needs:
     - compile
   script:
     - cargo clippy -- -D warnings
@@ -28,7 +28,7 @@ unit:
 integration:
   stage: test
   image: "rust:latest"
-  dependencies:
+  needs:
     - compile
     - unit
   script:

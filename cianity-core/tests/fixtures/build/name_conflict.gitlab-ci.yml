@@ -27,7 +27,7 @@ test.compile:
 test.check:
   stage: test
   image: "rust:latest"
-  dependencies:
+  needs:
     - test.compile
   script:
     - cargo check

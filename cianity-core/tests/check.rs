@@ -84,6 +84,11 @@ fn valid_variables_unset() {
     assert_check_passes("variables_unset");
 }
 
+#[test]
+fn valid_dependency_same_stage() {
+    assert_check_passes("dependency_same_stage");
+}
+
 // ── invalid fixtures ──────────────────────────────────────────────────────────
 
 #[test]
@@ -124,6 +129,26 @@ fn invalid_inherit_template_not_in_file() {
 #[test]
 fn invalid_inherit_stage_template_not_found() {
     assert_check_fails("inherit_stage_template_not_found");
+}
+
+#[test]
+fn invalid_dependency_later_stage() {
+    assert_check_fails("dependency_later_stage");
+}
+
+#[test]
+fn invalid_dependency_later_stage_from_template() {
+    assert_check_fails("dependency_later_stage_from_template");
+}
+
+#[test]
+fn invalid_dependency_on_self() {
+    assert_check_fails("dependency_on_self");
+}
+
+#[test]
+fn invalid_dependency_cycle() {
+    assert_check_fails("dependency_cycle");
 }
 
 // ── workspace check ───────────────────────────────────────────────────────────

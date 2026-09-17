@@ -1,0 +1,13 @@
+workflow ci {
+    stage build {
+        job compile { cargo build }
+
+        job lint ( dependencies = [ build.compile ] ) { cargo clippy }
+    }
+
+    stage test {
+        job unit ( dependencies = [ build.compile ] ) { cargo test }
+
+        job integration ( dependencies = [ build.compile, test.unit ] ) { cargo test --test integration }
+    }
+}

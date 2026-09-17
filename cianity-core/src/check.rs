@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 
 use ariadne::{Color, Label, Report, ReportKind, Source};
@@ -8,6 +9,8 @@ use ciane::{
     parse,
     validation::validate,
 };
+
+use crate::build::ir::{dependency_errors, lower_with_path};
 
 /// Read, parse, and validate a `ciane` source file.
 ///
@@ -47,6 +50,9 @@ pub fn run(path: &Path) -> anyhow::Result<()> {
             print_diagnostic(&filename, &source, &diag);
         }
         check_cross_file_inherits(&root, path, &filename, &source, &mut has_error);
+        if !has_error {
+            check_dependencies(&root, path, &filename, &source, &mut has_error);
+        }
     }
 
     if has_error {
@@ -159,6 +165,57 @@ fn check_cross_file_inherits(
             }
         }
     }
+}
+
+/// Report dependencies which can't be satisfied.
+///
+/// Dependencies may be inherited from templates (including ones in other
+/// files), so they're checked on the lowered workflow. If lowering fails, the
+/// error is left for `build` to report.
+fn check_dependencies(
+    root: &Root,
+    path: &Path,
+    filename: &str,
+    source: &str,
+    has_error: &mut bool,
+) {
+    let Ok(workflow) = lower_with_path(root, path) else {
+        return;
+    };
+    for err in dependency_errors(&workflow) {
+        *has_error = true;
+        print_diagnostic(
+            filename,
+            source,
+            &Diagnostic {
+                severity: Severity::Error,
+                message: err.message,
+                span: job_dependency_span(root, &err.stage, &err.job),
+            },
+        );
+    }
+}
+
+/// The span of the job's `dependencies` attribute, or its `inherit` attribute
+/// if the dependencies come from a template, falling back to the whole job.
+fn job_dependency_span(root: &Root, stage_name: &str, job_name: &str) -> Range<usize> {
+    let Some(job) = root
+        .stages()
+        .find(|s| s.name().as_deref() == Some(stage_name))
+        .and_then(|s| s.body())
+        .and_then(|b| b.jobs().find(|j| j.name().as_deref() == Some(job_name)))
+    else {
+        return 0..0;
+    };
+    let attr_named = |key: &str| {
+        job.attr_list()?
+            .attrs()
+            .find(|a| a.key_text().as_deref() == Some(key))
+    };
+    let range = attr_named("dependencies")
+        .or_else(|| attr_named("inherit"))
+        .map_or_else(|| job.syntax().text_range(), |a| a.syntax().text_range());
+    usize::from(range.start())..usize::from(range.end())
 }
 
 fn build_import_map(root: &Root, base: &Path) -> HashMap<String, PathBuf> {

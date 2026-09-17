@@ -1,0 +1,11 @@
+workflow ci {
+    template needs_unit ( dependencies = [ test.unit ] )
+
+    stage build {
+        job compile ( inherit = needs_unit ) { cargo build }
+    }
+
+    stage test {
+        job unit { cargo test }
+    }
+}

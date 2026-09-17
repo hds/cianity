@@ -18,7 +18,7 @@
 //! | `multiline_job` | multi-line `- \|` block scalar; bare step reference; image |
 //! | `template_and_inherit` | `steps` keyword expansion; step body override; unquoted `'` in script |
 //! | `workflow_import` | `use {}` block handled gracefully; stage-level attr ignored |
-//! | `job_dependencies` | `dependencies:` list from job attr; `dependencies: []` for jobs without deps; image; unquoted `--`/`-D` dashes in script |
+//! | `job_dependencies` | `dependencies:` list for earlier-stage deps; `needs:` list when any dep is in the same stage; `dependencies: []` for jobs without deps; image; unquoted `--`/`-D` dashes in script |
 //! | `name_conflict` | `stage.job` qualified names when the same job name appears in multiple stages; qualified names in `dependencies:` |
 //! | `cross_file_inherit` | `steps` expansion and step override from a template defined in another file |
 //! | `template_attrs_inherit` | template `image` attr propagates to inheriting jobs; job attr overrides template |
@@ -249,6 +249,60 @@ fn build_fails_on_unknown_job_attr() {
     assert!(
         err.to_string().contains("validation errors"),
         "unexpected error message: {err}"
+    );
+}
+
+fn assert_dependency_error(source: &str, expected: &str) {
+    let err = build::render_to_string(source, build::Target::Gitlab)
+        .expect_err("a file with an invalid dependency should not produce output");
+    assert!(
+        err.to_string().contains(expected),
+        "expected error containing {expected:?}, got: {err}"
+    );
+}
+
+#[test]
+fn build_fails_on_dependency_in_later_stage() {
+    assert_dependency_error(
+        "workflow ci {
+            stage build { job compile (dependencies = [test.unit]) { cargo build } }
+            stage test { job unit { cargo test } }
+        }",
+        "job `build.compile` depends on `test.unit` in later stage `test`",
+    );
+}
+
+#[test]
+fn build_fails_on_inherited_dependency_in_later_stage() {
+    assert_dependency_error(
+        "workflow ci {
+            template needs_unit (dependencies = [test.unit])
+            stage build { job compile (inherit = needs_unit) { cargo build } }
+            stage test { job unit { cargo test } }
+        }",
+        "job `build.compile` depends on `test.unit` in later stage `test`",
+    );
+}
+
+#[test]
+fn build_fails_on_self_dependency() {
+    assert_dependency_error(
+        "workflow ci { stage build { job compile (dependencies = [build.compile]) { cargo build } } }",
+        "job `build.compile` depends on itself",
+    );
+}
+
+#[test]
+fn build_fails_on_dependency_cycle() {
+    assert_dependency_error(
+        "workflow ci {
+            stage build {
+                job a (dependencies = [build.b]) { echo a }
+                job b (dependencies = [build.c]) { echo b }
+                job c (dependencies = [build.a]) { echo c }
+            }
+        }",
+        "dependency cycle in stage `build`: a -> b -> c -> a",
     );
 }
 

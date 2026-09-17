@@ -75,12 +75,140 @@ impl Job {
             .filter_map(|r| workflow.job(&r.stage, &r.job))
             .collect()
     }
+
+    /// `true` if this job depends on another job in its own stage, meaning it
+    /// must be ordered after that job rather than running concurrently.
+    #[must_use]
+    pub fn has_same_stage_dependency(&self) -> bool {
+        self.needs.iter().any(|r| r.stage == self.stage)
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct JobRef {
     pub stage: String,
     pub job: String,
+}
+
+/// A job dependency that can't be satisfied: on itself, on a job in a later
+/// stage, or part of a cycle between jobs in the same stage.
+#[derive(Debug)]
+pub struct DependencyError {
+    /// Stage of the job that declares (or inherits) the dependency.
+    pub stage: String,
+    /// Name of the job that declares (or inherits) the dependency.
+    pub job: String,
+    pub message: String,
+}
+
+/// Find all dependencies in `workflow` which can't be satisfied.
+///
+/// Dependencies are checked on the lowered workflow so that those inherited
+/// from templates are included. References to jobs that don't exist are not
+/// reported here.
+#[must_use]
+pub fn dependency_errors(workflow: &Workflow) -> Vec<DependencyError> {
+    let mut errors = Vec::new();
+
+    for (stage_idx, stage) in workflow.stages.iter().enumerate() {
+        for job in &stage.jobs {
+            for dep in &job.needs {
+                let message = if dep.stage == job.stage && dep.job == job.name {
+                    format!("job `{}` depends on itself", job.full_name())
+                } else if workflow
+                    .stages
+                    .iter()
+                    .position(|s| s.name == dep.stage)
+                    .is_some_and(|dep_idx| dep_idx > stage_idx)
+                {
+                    format!(
+                        "job `{}` depends on `{}.{}` in later stage `{}`; dependencies must be \
+                         on jobs in the same or an earlier stage",
+                        job.full_name(),
+                        dep.stage,
+                        dep.job,
+                        dep.stage
+                    )
+                } else {
+                    continue;
+                };
+                errors.push(DependencyError {
+                    stage: job.stage.clone(),
+                    job: job.name.clone(),
+                    message,
+                });
+            }
+        }
+        same_stage_cycle_errors(stage, &mut errors);
+    }
+
+    errors
+}
+
+/// Report each cycle formed by dependencies between jobs within `stage`.
+///
+/// Self-dependencies are excluded, as they're reported separately.
+fn same_stage_cycle_errors(stage: &Stage, errors: &mut Vec<DependencyError>) {
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Visit {
+        Unvisited,
+        InProgress,
+        Done,
+    }
+
+    fn visit(
+        idx: usize,
+        stage: &Stage,
+        visits: &mut [Visit],
+        path: &mut Vec<usize>,
+        errors: &mut Vec<DependencyError>,
+    ) {
+        visits[idx] = Visit::InProgress;
+        path.push(idx);
+        let job = &stage.jobs[idx];
+        for dep in &job.needs {
+            if dep.stage != stage.name || dep.job == job.name {
+                continue;
+            }
+            let Some(dep_idx) = stage.jobs.iter().position(|j| j.name == dep.job) else {
+                continue;
+            };
+            match visits[dep_idx] {
+                Visit::Unvisited => visit(dep_idx, stage, visits, path, errors),
+                Visit::InProgress => {
+                    let start = path
+                        .iter()
+                        .position(|&i| i == dep_idx)
+                        .expect("in-progress job is on the current path");
+                    let mut names: Vec<&str> = path[start..]
+                        .iter()
+                        .map(|&i| stage.jobs[i].name.as_str())
+                        .collect();
+                    names.push(&stage.jobs[dep_idx].name);
+                    errors.push(DependencyError {
+                        stage: stage.name.clone(),
+                        job: stage.jobs[dep_idx].name.clone(),
+                        message: format!(
+                            "dependency cycle in stage `{}`: {}",
+                            stage.name,
+                            names.join(" -> ")
+                        ),
+                    });
+                }
+                Visit::Done => {}
+            }
+        }
+        path.pop();
+        visits[idx] = Visit::Done;
+    }
+
+    let mut visits = vec![Visit::Unvisited; stage.jobs.len()];
+    let mut path = Vec::new();
+    for idx in 0..stage.jobs.len() {
+        if visits[idx] == Visit::Unvisited {
+            visit(idx, stage, &mut visits, &mut path, errors);
+        }
+    }
 }
 
 // ─── Lowering ────────────────────────────────────────────────────────────────

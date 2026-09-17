@@ -1,0 +1,7 @@
+workflow ci {
+    stage build {
+        job a ( dependencies = [ build.b ] ) { echo a }
+
+        job b ( dependencies = [ build.a ] ) { echo b }
+    }
+}

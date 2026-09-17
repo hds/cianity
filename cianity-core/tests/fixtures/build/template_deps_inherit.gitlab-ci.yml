@@ -17,7 +17,7 @@ unit:
 
 integration:
   stage: test
-  dependencies:
+  needs:
     - compile
     - unit
   script:
