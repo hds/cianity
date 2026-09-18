@@ -148,6 +148,16 @@ fn invalid_inherit_cross_file_missing_on_template() {
 }
 
 #[test]
+fn invalid_template_step_reference_unknown() {
+    assert_check_fails("template_step_reference_unknown");
+}
+
+#[test]
+fn invalid_template_steps_without_inherit() {
+    assert_check_fails("template_steps_without_inherit");
+}
+
+#[test]
 fn invalid_step_reference_unknown() {
     assert_check_fails("step_reference_unknown");
 }

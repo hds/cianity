@@ -1,0 +1,11 @@
+workflow ci {
+    stage build {
+        template solo [
+            steps,
+        ]
+
+        job fast ( inherit = solo ) [
+            steps,
+        ]
+    }
+}

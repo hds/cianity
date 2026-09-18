@@ -244,7 +244,18 @@ struct TemplateData {
 /// the list of local template names to inherit from (in order, last wins).
 struct RawTemplateEntry {
     own: TemplateData,
+    body: TemplateBody,
     inherit_names: Vec<String>,
+}
+
+/// How a template's body determines its steps.
+enum TemplateBody {
+    /// No body at all: the steps it inherits are kept as they are.
+    Inherited,
+    /// A single inline body, which replaces anything inherited.
+    Inline(String),
+    /// A step list, resolved against the inherited steps like a job body.
+    Steps(JobBodySteps),
 }
 
 /// Merge two variable lists: overlay entries override same-named base entries;
@@ -342,16 +353,16 @@ fn inherit_names_from_attr(attr: &ast::Attr) -> Vec<String> {
     )
 }
 
-fn raw_template_data_from_ast(tmpl: &ast::TemplateDef) -> (TemplateData, Vec<String>) {
-    let steps = if let Some(inline) = tmpl.inline_body() {
-        let step_name = tmpl.name().map_or_else(String::new, |n| n.to_string());
-        inline
-            .shell_text()
-            .map(|s| vec![(step_name, dedent(&s))])
-            .unwrap_or_default()
+fn raw_template_data_from_ast(
+    tmpl: &ast::TemplateDef,
+) -> (TemplateData, TemplateBody, Vec<String>) {
+    let body = if let Some(inline) = tmpl.inline_body() {
+        inline.shell_text().map_or(TemplateBody::Inherited, |s| {
+            TemplateBody::Inline(dedent(&s))
+        })
     } else {
         tmpl.body()
-            .map_or_else(Vec::new, |b| collect_template_steps(&b))
+            .map_or(TemplateBody::Inherited, TemplateBody::Steps)
     };
     let mut image = None;
     let mut needs = Vec::new();
@@ -390,7 +401,7 @@ fn raw_template_data_from_ast(tmpl: &ast::TemplateDef) -> (TemplateData, Vec<Str
     }
     (
         TemplateData {
-            steps,
+            steps: Vec::new(),
             image,
             needs,
             artifacts,
@@ -398,6 +409,7 @@ fn raw_template_data_from_ast(tmpl: &ast::TemplateDef) -> (TemplateData, Vec<Str
             variables,
             unset_variables,
         },
+        body,
         inherit_names,
     )
 }
@@ -431,6 +443,13 @@ pub enum ErrorSite {
         job: String,
         step: String,
     },
+    /// A bare `step` reference in a template body.
+    TemplateStepRef {
+        /// The stage the template is defined in; `None` at the top level.
+        stage: Option<String>,
+        template: String,
+        step: String,
+    },
 }
 
 /// The templates and imports of one file.
@@ -445,13 +464,17 @@ impl FileTemplates {
         let mut raw: HashMap<TemplateKey, RawTemplateEntry> = HashMap::new();
         let mut add = |stage: Option<String>, tmpl: &ast::TemplateDef| {
             if let Some(name) = tmpl.name() {
-                let (own, inherit_names) = raw_template_data_from_ast(tmpl);
+                let (own, body, inherit_names) = raw_template_data_from_ast(tmpl);
                 raw.insert(
                     TemplateKey {
                         stage,
                         name: name.to_string(),
                     },
-                    RawTemplateEntry { own, inherit_names },
+                    RawTemplateEntry {
+                        own,
+                        body,
+                        inherit_names,
+                    },
                 );
             }
         };
@@ -636,18 +659,76 @@ impl TemplateResolver {
         };
         let own = entry.own.clone();
         let inherit_names = entry.inherit_names.clone();
+        let body = match &entry.body {
+            TemplateBody::Inherited => TemplateBody::Inherited,
+            TemplateBody::Inline(shell) => TemplateBody::Inline(shell.clone()),
+            TemplateBody::Steps(steps) => TemplateBody::Steps(steps.clone()),
+        };
 
         self.stack.push(id.clone());
+        let errors_before = self.errors.len();
         let mut merged = TemplateData::default();
         for parent in &inherit_names {
             let data = self.resolve(file, parent, key.stage.as_deref());
             merged = merge_template_data(merged, data);
         }
+        let inherits_resolved = self.errors.len() == errors_before;
+        let inherited_steps = merged.steps.clone();
         merged = merge_template_data(merged, own);
+
+        // A template's body picks its steps the same way a job's does.
+        merged.steps = match body {
+            TemplateBody::Inherited => inherited_steps,
+            TemplateBody::Inline(shell) => vec![(key.name.clone(), shell)],
+            TemplateBody::Steps(body) => {
+                let (steps, unresolved) = resolve_steps(&body, &inherited_steps);
+                // A template with no `inherit` is reported by `ciane` validation,
+                // and one whose parents failed to resolve has been reported already.
+                if !inherit_names.is_empty() && inherits_resolved {
+                    for step in unresolved {
+                        self.step_error(file, key, &step);
+                    }
+                }
+                steps
+            }
+        };
         self.stack.pop();
 
         self.resolved.insert(id, merged.clone());
         merged
+    }
+
+    /// Report a bare `step` reference in a template that names a step none of
+    /// its inherited templates define.
+    fn step_error(&mut self, file: &Path, key: &TemplateKey, step: &str) {
+        let name = match &key.stage {
+            Some(stage) => format!("{stage}.{}", key.name),
+            None => key.name.clone(),
+        };
+        let message =
+            format!("template `{name}` uses step `{step}`, but no template it inherits defines it");
+        let error = if file == self.root {
+            LowerError {
+                site: ErrorSite::TemplateStepRef {
+                    stage: key.stage.clone(),
+                    template: key.name.clone(),
+                    step: step.to_owned(),
+                },
+                message,
+            }
+        } else {
+            LowerError {
+                site: ErrorSite::Import(file.to_path_buf()),
+                message: format!("in `{}`: {message}", file.display()),
+            }
+        };
+        if !self
+            .errors
+            .iter()
+            .any(|e| e.site == error.site && e.message == error.message)
+        {
+            self.errors.push(error);
+        }
     }
 
     /// Read and parse an imported file, keeping it for later references.
@@ -949,26 +1030,24 @@ fn job_script(job: &ast::Job, template_steps: &[(String, String)]) -> (Vec<Strin
             .unwrap_or_default();
         (script, Vec::new())
     } else if let Some(steps_body) = job.steps_body() {
-        resolve_steps(&steps_body, template_steps)
+        let (steps, unresolved) = resolve_steps(&steps_body, template_steps);
+        (
+            steps.into_iter().map(|(_, shell)| shell).collect(),
+            unresolved,
+        )
     } else {
         (Vec::new(), Vec::new())
     }
 }
 
-fn collect_template_steps(body: &JobBodySteps) -> Vec<(String, String)> {
-    body.steps()
-        .filter_map(|s| {
-            let name = s.name()?.to_string();
-            let shell = s.shell_text()?;
-            Some((name, dedent(&shell)))
-        })
-        .collect()
-}
-
+/// Resolve a step list against the steps it inherits.
+///
+/// Returns the steps, named so that whatever inherits them can refer to them
+/// in turn, and the names of references no inherited template defines.
 fn resolve_steps(
     body: &JobBodySteps,
     template_steps: &[(String, String)],
-) -> (Vec<String>, Vec<String>) {
+) -> (Vec<(String, String)>, Vec<String>) {
     // Names of all steps explicitly listed in this job body (both full steps
     // and bare references).  These are skipped when `steps` is expanded so the
     // same step does not appear twice.
@@ -984,18 +1063,18 @@ fn resolve_steps(
         match child.kind() {
             SyntaxKind::Step => {
                 if let Some(step) = ast::Step::cast(child) {
+                    let name = step.name().map_or_else(String::new, |n| n.to_string());
                     if let Some(shell) = step.shell_text() {
                         // Full step with an explicit body.
-                        script.push(dedent(&shell));
-                    } else if let Some(name) = step.name() {
+                        script.push((name, dedent(&shell)));
+                    } else if step.name().is_some() {
                         // Bare step reference: inline the named template step.
-                        if let Some((_, shell)) = template_steps
-                            .iter()
-                            .find(|(n, _)| n.as_str() == name.as_str())
+                        if let Some((_, shell)) =
+                            template_steps.iter().find(|(n, _)| n.as_str() == name)
                         {
-                            script.push(shell.clone());
+                            script.push((name, shell.clone()));
                         } else {
-                            unresolved.push(name.to_string());
+                            unresolved.push(name);
                         }
                     }
                 }
@@ -1005,7 +1084,7 @@ fn resolve_steps(
                 // steps in this job.
                 for (name, shell) in template_steps {
                     if !explicit_names.contains(name) {
-                        script.push(shell.clone());
+                        script.push((name.clone(), shell.clone()));
                     }
                 }
             }

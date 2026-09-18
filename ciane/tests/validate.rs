@@ -451,6 +451,65 @@ workflow ci {
 }
 
 #[test]
+fn valid_template_keeps_some_inherited_steps() {
+    assert_no_diagnostics(
+        r"
+workflow ci {
+    stage build {
+        template base [
+            step setup { rustup update }
+            step build { cargo build }
+        ]
+
+        template quick ( inherit = base ) [
+            step setup,
+            step lint { cargo clippy }
+        ]
+
+        job fast ( inherit = quick ) [
+            steps,
+        ]
+    }
+}
+",
+    );
+}
+
+#[test]
+fn error_template_steps_without_inherit() {
+    assert_has_diagnostic(
+        r"
+workflow ci {
+    stage build {
+        template solo [
+            steps,
+        ]
+    }
+}
+",
+        Severity::Error,
+        "`steps` can only be used in a template that has an `inherit` attribute",
+    );
+}
+
+#[test]
+fn error_template_bare_step_reference_without_inherit() {
+    assert_has_diagnostic(
+        r"
+workflow ci {
+    stage build {
+        template solo [
+            step setup,
+        ]
+    }
+}
+",
+        Severity::Error,
+        "`step setup` without a body can only be used in a template that has an `inherit` attribute",
+    );
+}
+
+#[test]
 fn error_bare_step_reference_without_inherit() {
     assert_has_diagnostic(
         r"

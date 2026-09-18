@@ -6,6 +6,7 @@ workflow ci {
         ]
 
         template extended (inherit = base) [
+            steps,
             step test { cargo test }
         ]
 

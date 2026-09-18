@@ -25,6 +25,7 @@
 //! | `top_level_template_inherit` | job inherits from a top-level template defined outside any stage |
 //! | `cross_file_stage_template` | `ns/stage.tmpl` syntax resolves a template inside a named stage in another file |
 //! | `template_deps_inherit` | template `dependencies` attr propagates to inheriting job; job `dependencies` overrides template |
+//! | `template_partial_steps` | a template keeps only some of the steps it inherits; jobs see just those |
 //! | `cross_file_template_chain` | imported template's own `inherit` chain is applied |
 //! | `cross_file_template_on_template` | a template in this file inherits one from another file |
 //! | `cross_file_transitive_import` | imported template inherits through that file's own `use` import |
@@ -158,6 +159,11 @@ fn build_strategy_none() {
 #[test]
 fn build_template_inherit() {
     assert_gitlab_snapshot("template_inherit");
+}
+
+#[test]
+fn build_template_partial_steps() {
+    assert_gitlab_snapshot("template_partial_steps");
 }
 
 #[test]
@@ -437,6 +443,28 @@ fn build_fails_on_unknown_step_reference() {
     .to_string();
     assert!(
         err.contains("job `test.unit` uses step `nope`, but no template it inherits defines it"),
+        "unexpected error message: {err}"
+    );
+}
+
+#[test]
+fn build_fails_on_unknown_step_reference_in_template() {
+    let err = build::render_to_string(
+        "workflow ci {
+            stage build {
+                template base [ step setup { rustup update } ]
+                template quick (inherit = base) [ step setpu, ]
+                job fast (inherit = quick) [ steps, ]
+            }
+        }",
+        build::Target::Gitlab,
+    )
+    .expect_err("a file with an unknown step reference should not produce output")
+    .to_string();
+    assert!(
+        err.contains(
+            "template `build.quick` uses step `setpu`, but no template it inherits defines it"
+        ),
         "unexpected error message: {err}"
     );
 }

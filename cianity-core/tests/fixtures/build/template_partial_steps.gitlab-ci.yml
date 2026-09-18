@@ -1,0 +1,15 @@
+stages:
+  - build
+
+fast:
+  stage: build
+  dependencies: []
+  script:
+    - rustup update
+    - cargo clippy
+
+named:
+  stage: build
+  dependencies: []
+  script:
+    - cargo clippy

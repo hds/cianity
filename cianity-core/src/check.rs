@@ -91,6 +91,11 @@ fn check_resolved_workflow(root: &Root, path: &Path, diagnostics: &mut Vec<Diagn
             ErrorSite::InheritRef(reference) => inherit_ref_span(root, reference),
             ErrorSite::Import(file) => import_span(root, path, file),
             ErrorSite::StepRef { stage, job, step } => step_ref_span(root, stage, job, step),
+            ErrorSite::TemplateStepRef {
+                stage,
+                template,
+                step,
+            } => template_step_ref_span(root, stage.as_deref(), template, step),
         };
         diagnostics.push(Diagnostic {
             severity: Severity::Error,
@@ -122,6 +127,32 @@ fn step_ref_span(root: &Root, stage_name: &str, job_name: &str, step: &str) -> R
         .and_then(|s| s.body())
         .and_then(|b| b.jobs().find(|j| j.name().as_deref() == Some(job_name)))
         .and_then(|job| job.steps_body())
+        .and_then(|body| body.steps().find(|s| s.name().as_deref() == Some(step)))
+        .map_or(0..0, |step| span_of(step.syntax()))
+}
+
+/// The span of a bare `step` reference in a template body.
+fn template_step_ref_span(
+    root: &Root,
+    stage_name: Option<&str>,
+    template: &str,
+    step: &str,
+) -> Range<usize> {
+    let found = match stage_name {
+        Some(stage_name) => root
+            .stages()
+            .find(|s| s.name().as_deref() == Some(stage_name))
+            .and_then(|s| s.body())
+            .and_then(|b| {
+                b.templates()
+                    .find(|t| t.name().as_deref() == Some(template))
+            }),
+        None => root
+            .templates()
+            .find(|t| t.name().as_deref() == Some(template)),
+    };
+    found
+        .and_then(|tmpl| tmpl.body())
         .and_then(|body| body.steps().find(|s| s.name().as_deref() == Some(step)))
         .map_or(0..0, |step| span_of(step.syntax()))
 }

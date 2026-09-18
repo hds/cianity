@@ -100,6 +100,7 @@ fn check_workflow_def(workflow: &WorkflowDef, diagnostics: &mut Vec<Diagnostic>)
         check_unknown_attrs(&tmpl, "template", VALID_TEMPLATE_ATTRS, diagnostics);
         check_dependencies_attr(&tmpl, diagnostics);
         check_template_inherit(&tmpl, &root_template_names, &stage_templates, diagnostics);
+        check_template_steps(&tmpl, diagnostics);
     }
     for stage in body.stages() {
         check_stage(&stage, &root_template_names, &stage_templates, diagnostics);
@@ -211,6 +212,53 @@ fn check_stage(
         check_unknown_attrs(&tmpl, "template", VALID_TEMPLATE_ATTRS, diagnostics);
         check_dependencies_attr(&tmpl, diagnostics);
         check_template_inherit(&tmpl, &all_template_names, stage_templates, diagnostics);
+        check_template_steps(&tmpl, diagnostics);
+    }
+}
+
+fn check_template_steps(tmpl: &TemplateDef, diagnostics: &mut Vec<Diagnostic>) {
+    let Some(body) = tmpl.body() else {
+        return;
+    };
+    let has_inherit = tmpl.attr_list().is_some_and(|al| {
+        al.attrs()
+            .any(|a| a.key_text().as_deref() == Some("inherit"))
+    });
+    if !has_inherit {
+        check_step_reuse(&body, "template", diagnostics);
+    }
+}
+
+/// `steps` and bare `step` references reuse steps from an inherited template,
+/// so they only make sense where there is something to inherit from.
+fn check_step_reuse(
+    body: &crate::ast::JobBodySteps,
+    owner: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let Some(kw) = body.steps_keywords().next() {
+        diagnostics.push(Diagnostic {
+            severity: Severity::Error,
+            message: format!(
+                "`steps` can only be used in a {owner} that has an `inherit` attribute"
+            ),
+            span: span_of(kw.syntax()),
+        });
+    }
+
+    // A step with no body reuses a step from an inherited template.
+    for step in body.steps().filter(|s| s.shell_text().is_none()) {
+        let Some(name) = step.name() else {
+            continue;
+        };
+        diagnostics.push(Diagnostic {
+            severity: Severity::Error,
+            message: format!(
+                "`step {name}` without a body can only be used in a {owner} that has an \
+                 `inherit` attribute"
+            ),
+            span: span_of(step.syntax()),
+        });
     }
 }
 
@@ -353,31 +401,8 @@ fn check_job_steps(
         }
     }
 
-    if has_inherit {
-        return;
-    }
-
-    if let Some(kw) = body.steps_keywords().next() {
-        diagnostics.push(Diagnostic {
-            severity: Severity::Error,
-            message: "`steps` can only be used in a job that has an `inherit` attribute".to_owned(),
-            span: span_of(kw.syntax()),
-        });
-    }
-
-    // A step with no body reuses a step from an inherited template.
-    for step in body.steps().filter(|s| s.shell_text().is_none()) {
-        let Some(name) = step.name() else {
-            continue;
-        };
-        diagnostics.push(Diagnostic {
-            severity: Severity::Error,
-            message: format!(
-                "`step {name}` without a body can only be used in a job that has an \
-                 `inherit` attribute"
-            ),
-            span: span_of(step.syntax()),
-        });
+    if !has_inherit {
+        check_step_reuse(&body, "job", diagnostics);
     }
 }
 

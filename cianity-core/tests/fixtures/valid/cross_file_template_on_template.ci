@@ -2,6 +2,7 @@ workflow ci {
     use shared ( path = ../shared/templates.ci )
 
     template local ( inherit = shared/base ) [
+        steps,
         step extra { echo extra }
     ]
 

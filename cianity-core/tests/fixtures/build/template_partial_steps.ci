@@ -1,0 +1,22 @@
+workflow ci {
+    stage build {
+        template base [
+            step setup { rustup update }
+            step build { cargo build }
+            step test { cargo test }
+        ]
+
+        template quick ( inherit = base ) [
+            step setup,
+            step lint { cargo clippy }
+        ]
+
+        job fast ( inherit = quick ) [
+            steps,
+        ]
+
+        job named ( inherit = quick ) [
+            step lint,
+        ]
+    }
+}

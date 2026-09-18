@@ -11,6 +11,7 @@ workflow ci {
 
     stage test {
         template with_nextest ( inherit = build.base ) [
+            steps,
             step nextest { cargo nextest run }
         ]
 
