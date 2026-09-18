@@ -25,6 +25,7 @@
 //! | `top_level_template_inherit` | job inherits from a top-level template defined outside any stage |
 //! | `cross_file_stage_template` | `ns/stage.tmpl` syntax resolves a template inside a named stage in another file |
 //! | `template_deps_inherit` | template `dependencies` attr propagates to inheriting job; job `dependencies` overrides template |
+//! | `template_chain_narrows` | each level down a template chain sees only the steps the level above kept |
 //! | `template_partial_steps` | a template keeps only some of the steps it inherits; jobs see just those |
 //! | `cross_file_template_chain` | imported template's own `inherit` chain is applied |
 //! | `cross_file_template_on_template` | a template in this file inherits one from another file |
@@ -159,6 +160,11 @@ fn build_strategy_none() {
 #[test]
 fn build_template_inherit() {
     assert_gitlab_snapshot("template_inherit");
+}
+
+#[test]
+fn build_template_chain_narrows() {
+    assert_gitlab_snapshot("template_chain_narrows");
 }
 
 #[test]
@@ -464,6 +470,44 @@ fn build_fails_on_unknown_step_reference_in_template() {
     assert!(
         err.contains(
             "template `build.quick` uses step `setpu`, but no template it inherits defines it"
+        ),
+        "unexpected error message: {err}"
+    );
+}
+
+/// A base step the intermediate template dropped is not visible further down.
+#[test]
+fn build_fails_on_step_dropped_by_intermediate_template() {
+    let source = "workflow ci {
+            stage build {
+                template base [
+                    step setup { rustup update }
+                    step build { cargo build }
+                ]
+                template quick (inherit = base) [ step setup, ]
+                REFERENCE
+            }
+        }";
+
+    let job = source.replace("REFERENCE", "job fast (inherit = quick) [ step build, ]");
+    let err = build::render_to_string(&job, build::Target::Gitlab)
+        .expect_err("a dropped step should not be visible to the job")
+        .to_string();
+    assert!(
+        err.contains("job `build.fast` uses step `build`, but no template it inherits defines it"),
+        "unexpected error message: {err}"
+    );
+
+    let template = source.replace(
+        "REFERENCE",
+        "template deeper (inherit = quick) [ step build, ]",
+    );
+    let err = build::render_to_string(&template, build::Target::Gitlab)
+        .expect_err("a dropped step should not be visible to the next template")
+        .to_string();
+    assert!(
+        err.contains(
+            "template `build.deeper` uses step `build`, but no template it inherits defines it"
         ),
         "unexpected error message: {err}"
     );

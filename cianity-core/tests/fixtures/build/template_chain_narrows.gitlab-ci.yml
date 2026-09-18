@@ -1,0 +1,14 @@
+stages:
+  - build
+
+narrowed:
+  stage: build
+  dependencies: []
+  script:
+    - cargo clippy
+
+kept:
+  stage: build
+  dependencies: []
+  script:
+    - rustup update

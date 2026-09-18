@@ -731,6 +731,20 @@ impl TemplateResolver {
         }
     }
 
+    /// Resolve every template in the root file, so that problems in a
+    /// template no job happens to inherit are reported too.
+    fn resolve_root_templates(&mut self) {
+        let root = self.root.clone();
+        let keys: Vec<TemplateKey> = self
+            .files
+            .get(&root)
+            .map(|f| f.raw.keys().cloned().collect())
+            .unwrap_or_default();
+        for key in keys {
+            self.resolve_key(&root, &key);
+        }
+    }
+
     /// Read and parse an imported file, keeping it for later references.
     fn load(&mut self, path: &Path) -> bool {
         if self.files.contains_key(path) {
@@ -924,6 +938,8 @@ fn lower_inner(root: &Root, path: &Path, imports_allowed: bool) -> (Workflow, Ve
             jobs,
         });
     }
+
+    resolver.resolve_root_templates();
 
     (Workflow { stages, strategy }, resolver.errors)
 }
