@@ -20,8 +20,8 @@ use super::ir::{self, Job, JobRef, Workflow, WorkflowStrategy};
 /// Returns `Err` if the source has parse errors.
 pub(super) fn render_source(source: &str) -> anyhow::Result<String> {
     let root = parse_root(source)?;
-    let workflow = ir::lower(&root);
-    ensure_no_errors(&root, &workflow, &[])?;
+    let (workflow, lower_errors) = ir::lower_partial(&root);
+    ensure_no_errors(&root, &workflow, &lower_errors)?;
     Ok(render(&workflow))
 }
 
@@ -55,7 +55,7 @@ fn parse_root(source: &str) -> anyhow::Result<Root> {
 fn ensure_no_errors(
     root: &Root,
     workflow: &Workflow,
-    lower_errors: &[ir::TemplateError],
+    lower_errors: &[ir::LowerError],
 ) -> anyhow::Result<()> {
     let msgs: Vec<String> = validate(root)
         .into_iter()

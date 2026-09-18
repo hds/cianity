@@ -353,15 +353,30 @@ fn check_job_steps(
         }
     }
 
-    let steps_kw_count = body.steps_keywords().count();
-    if steps_kw_count > 0
-        && !has_inherit
-        && let Some(kw) = body.steps_keywords().next()
-    {
+    if has_inherit {
+        return;
+    }
+
+    if let Some(kw) = body.steps_keywords().next() {
         diagnostics.push(Diagnostic {
             severity: Severity::Error,
             message: "`steps` can only be used in a job that has an `inherit` attribute".to_owned(),
             span: span_of(kw.syntax()),
+        });
+    }
+
+    // A step with no body reuses a step from an inherited template.
+    for step in body.steps().filter(|s| s.shell_text().is_none()) {
+        let Some(name) = step.name() else {
+            continue;
+        };
+        diagnostics.push(Diagnostic {
+            severity: Severity::Error,
+            message: format!(
+                "`step {name}` without a body can only be used in a job that has an \
+                 `inherit` attribute"
+            ),
+            span: span_of(step.syntax()),
         });
     }
 }

@@ -1,0 +1,12 @@
+workflow ci {
+    stage test {
+        template base [
+            step setup { rustup update }
+        ]
+
+        job unit ( inherit = base ) [
+            step setup,
+            step nope,
+        ]
+    }
+}

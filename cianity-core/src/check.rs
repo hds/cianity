@@ -9,7 +9,7 @@ use ciane::{
     validation::validate,
 };
 
-use crate::build::ir::{dependency_errors, lower_with_path_partial};
+use crate::build::ir::{ErrorSite, dependency_errors, lower_with_path_partial};
 
 /// Read, parse, and validate a `ciane` source file.
 ///
@@ -87,10 +87,11 @@ fn check_resolved_workflow(root: &Root, path: &Path, diagnostics: &mut Vec<Diagn
     let (workflow, template_errors) = lower_with_path_partial(root, path);
 
     for err in template_errors {
-        let span = err.file.as_deref().map_or_else(
-            || inherit_ref_span(root, &err.reference),
-            |file| import_span(root, path, file),
-        );
+        let span = match &err.site {
+            ErrorSite::InheritRef(reference) => inherit_ref_span(root, reference),
+            ErrorSite::Import(file) => import_span(root, path, file),
+            ErrorSite::StepRef { stage, job, step } => step_ref_span(root, stage, job, step),
+        };
         diagnostics.push(Diagnostic {
             severity: Severity::Error,
             message: err.message,
@@ -112,6 +113,17 @@ fn inherit_ref_span(root: &Root, reference: &str) -> Range<usize> {
     inherit_attrs(root)
         .find(|attr| inherit_names_of(attr).iter().any(|name| name == reference))
         .map_or(0..0, |attr| span_of(attr.syntax()))
+}
+
+/// The span of a bare `step` reference in a job body.
+fn step_ref_span(root: &Root, stage_name: &str, job_name: &str, step: &str) -> Range<usize> {
+    root.stages()
+        .find(|s| s.name().as_deref() == Some(stage_name))
+        .and_then(|s| s.body())
+        .and_then(|b| b.jobs().find(|j| j.name().as_deref() == Some(job_name)))
+        .and_then(|job| job.steps_body())
+        .and_then(|body| body.steps().find(|s| s.name().as_deref() == Some(step)))
+        .map_or(0..0, |step| span_of(step.syntax()))
 }
 
 /// The span of the `use` import that brings in `file`.

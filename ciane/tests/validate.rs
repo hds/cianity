@@ -430,6 +430,44 @@ workflow ci {
 }
 
 #[test]
+fn valid_bare_step_reference_with_inherit() {
+    assert_no_diagnostics(
+        r"
+workflow ci {
+    stage test {
+        template base [
+            step setup { rustup update }
+            step run { cargo test }
+        ]
+
+        job unit ( inherit = base ) [
+            step setup,
+            step run { cargo test -- unit }
+        ]
+    }
+}
+",
+    );
+}
+
+#[test]
+fn error_bare_step_reference_without_inherit() {
+    assert_has_diagnostic(
+        r"
+workflow ci {
+    stage test {
+        job unit [
+            step setup,
+        ]
+    }
+}
+",
+        Severity::Error,
+        "`step setup` without a body can only be used in a job that has an `inherit` attribute",
+    );
+}
+
+#[test]
 fn error_steps_without_inherit() {
     assert_has_diagnostic(
         r"

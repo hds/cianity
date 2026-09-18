@@ -1,0 +1,7 @@
+workflow ci {
+    stage test {
+        job unit [
+            step setup,
+        ]
+    }
+}

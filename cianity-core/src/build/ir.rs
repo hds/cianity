@@ -410,14 +410,27 @@ struct TemplateKey {
     name: String,
 }
 
-/// A template reference that couldn't be resolved.
+/// Something a workflow refers to that couldn't be resolved while lowering.
 #[derive(Debug)]
-pub struct TemplateError {
-    /// The reference as written, e.g. `shared/base`.
-    pub reference: String,
-    /// The file the reference is written in, when it isn't the root file.
-    pub file: Option<PathBuf>,
+pub struct LowerError {
+    pub site: ErrorSite,
     pub message: String,
+}
+
+/// Where a [`LowerError`] was written, so that it can be pointed at in the
+/// source.
+#[derive(Debug, PartialEq, Eq)]
+pub enum ErrorSite {
+    /// An `inherit` reference in the file being lowered, as written.
+    InheritRef(String),
+    /// Somewhere inside a file reached through a `use` import.
+    Import(PathBuf),
+    /// A bare `step` reference in a job body.
+    StepRef {
+        stage: String,
+        job: String,
+        step: String,
+    },
 }
 
 /// The templates and imports of one file.
@@ -481,7 +494,7 @@ struct TemplateResolver {
     stack: Vec<(PathBuf, TemplateKey)>,
     /// Whether references into other files may be followed.
     imports_allowed: bool,
-    errors: Vec<TemplateError>,
+    errors: Vec<LowerError>,
 }
 
 impl TemplateResolver {
@@ -654,24 +667,22 @@ impl TemplateResolver {
     }
 
     fn error(&mut self, file: &Path, reference: &str, message: String) {
-        let (file, message) = if file == self.root {
-            (None, message)
+        let error = if file == self.root {
+            LowerError {
+                site: ErrorSite::InheritRef(reference.to_owned()),
+                message,
+            }
         } else {
-            (
-                Some(file.to_path_buf()),
-                format!("in `{}`: {message}", file.display()),
-            )
-        };
-        let error = TemplateError {
-            reference: reference.to_owned(),
-            file,
-            message,
+            LowerError {
+                site: ErrorSite::Import(file.to_path_buf()),
+                message: format!("in `{}`: {message}", file.display()),
+            }
         };
         // The same reference is resolved once per job that inherits it.
         if !self
             .errors
             .iter()
-            .any(|e| e.reference == error.reference && e.message == error.message)
+            .any(|e| e.site == error.site && e.message == error.message)
         {
             self.errors.push(error);
         }
@@ -704,7 +715,14 @@ fn strategy_from_str(s: &str) -> WorkflowStrategy {
 /// the source came from a file.
 #[must_use]
 pub fn lower(root: &Root) -> Workflow {
-    lower_inner(root, Path::new(""), false).0
+    lower_partial(root).0
+}
+
+/// Lower a parsed `Root` like [`lower`], returning what couldn't be resolved
+/// alongside the workflow.
+#[must_use]
+pub fn lower_partial(root: &Root) -> (Workflow, Vec<LowerError>) {
+    lower_inner(root, Path::new(""), false)
 }
 
 /// Lower a parsed `Root` into a `Workflow`, resolving cross-file template
@@ -735,11 +753,11 @@ pub fn lower_with_path(root: &Root, path: &Path) -> anyhow::Result<Workflow> {
 /// it, and the reason is returned alongside the workflow. This allows the rest
 /// of the workflow to be checked in the same pass.
 #[must_use]
-pub fn lower_with_path_partial(root: &Root, path: &Path) -> (Workflow, Vec<TemplateError>) {
+pub fn lower_with_path_partial(root: &Root, path: &Path) -> (Workflow, Vec<LowerError>) {
     lower_inner(root, path, true)
 }
 
-fn lower_inner(root: &Root, path: &Path, imports_allowed: bool) -> (Workflow, Vec<TemplateError>) {
+fn lower_inner(root: &Root, path: &Path, imports_allowed: bool) -> (Workflow, Vec<LowerError>) {
     let strategy = strategy_from_root(root);
     let mut resolver = TemplateResolver::new(root, path, imports_allowed);
     let mut stages = Vec::new();
@@ -764,10 +782,12 @@ fn lower_inner(root: &Root, path: &Path, imports_allowed: bool) -> (Workflow, Ve
             } = parse_job_attrs(&job);
 
             let mut template_data = TemplateData::default();
+            let errors_before = resolver.errors.len();
             for name in &inherit_names {
                 let data = resolver.resolve(path, name, Some(&stage_name));
                 template_data = merge_template_data(template_data, data);
             }
+            let inherits_resolved = resolver.errors.len() == errors_before;
 
             if image.is_none() {
                 image.clone_from(&template_data.image);
@@ -787,7 +807,24 @@ fn lower_inner(root: &Root, path: &Path, imports_allowed: bool) -> (Workflow, Ve
             }
             variables = merge_variables(base_vars, variables);
 
-            let script = job_script(&job, &template_data.steps);
+            let (script, unresolved_steps) = job_script(&job, &template_data.steps);
+            // A job with no `inherit` is reported by `ciane` validation, and a
+            // job whose templates failed to resolve has been reported already.
+            if !inherit_names.is_empty() && inherits_resolved {
+                for step in unresolved_steps {
+                    resolver.errors.push(LowerError {
+                        message: format!(
+                            "job `{stage_name}.{job_name}` uses step `{step}`, but no template \
+                             it inherits defines it"
+                        ),
+                        site: ErrorSite::StepRef {
+                            stage: stage_name.clone(),
+                            job: job_name.clone(),
+                            step,
+                        },
+                    });
+                }
+            }
 
             jobs.push(Job {
                 name: job_name,
@@ -902,16 +939,19 @@ fn vars_and_unsets_from_attr_value(val: &ast::AttrValue) -> (Vec<(String, String
     (vars, unsets)
 }
 
-fn job_script(job: &ast::Job, template_steps: &[(String, String)]) -> Vec<String> {
+/// The job's script, along with the names of any bare `step` references that
+/// no inherited template defines.
+fn job_script(job: &ast::Job, template_steps: &[(String, String)]) -> (Vec<String>, Vec<String>) {
     if let Some(inline) = job.inline_body() {
-        inline
+        let script = inline
             .shell_text()
             .map(|s| vec![dedent(&s)])
-            .unwrap_or_default()
+            .unwrap_or_default();
+        (script, Vec::new())
     } else if let Some(steps_body) = job.steps_body() {
         resolve_steps(&steps_body, template_steps)
     } else {
-        Vec::new()
+        (Vec::new(), Vec::new())
     }
 }
 
@@ -925,7 +965,10 @@ fn collect_template_steps(body: &JobBodySteps) -> Vec<(String, String)> {
         .collect()
 }
 
-fn resolve_steps(body: &JobBodySteps, template_steps: &[(String, String)]) -> Vec<String> {
+fn resolve_steps(
+    body: &JobBodySteps,
+    template_steps: &[(String, String)],
+) -> (Vec<String>, Vec<String>) {
     // Names of all steps explicitly listed in this job body (both full steps
     // and bare references).  These are skipped when `steps` is expanded so the
     // same step does not appear twice.
@@ -935,6 +978,7 @@ fn resolve_steps(body: &JobBodySteps, template_steps: &[(String, String)]) -> Ve
         .collect();
 
     let mut script = Vec::new();
+    let mut unresolved = Vec::new();
 
     for child in body.syntax().children() {
         match child.kind() {
@@ -950,6 +994,8 @@ fn resolve_steps(body: &JobBodySteps, template_steps: &[(String, String)]) -> Ve
                             .find(|(n, _)| n.as_str() == name.as_str())
                         {
                             script.push(shell.clone());
+                        } else {
+                            unresolved.push(name.to_string());
                         }
                     }
                 }
@@ -967,7 +1013,7 @@ fn resolve_steps(body: &JobBodySteps, template_steps: &[(String, String)]) -> Ve
         }
     }
 
-    script
+    (script, unresolved)
 }
 
 fn dedent(s: &str) -> String {

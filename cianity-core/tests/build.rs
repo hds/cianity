@@ -420,6 +420,28 @@ fn build_fails_on_dependencies_not_a_list() {
 }
 
 #[test]
+fn build_fails_on_unknown_step_reference() {
+    let err = build::render_to_string(
+        "workflow ci {
+            stage test {
+                template base [ step setup { rustup update } ]
+                job unit (inherit = base) [
+                    step setup,
+                    step nope,
+                ]
+            }
+        }",
+        build::Target::Gitlab,
+    )
+    .expect_err("a file with an unknown step reference should not produce output")
+    .to_string();
+    assert!(
+        err.contains("job `test.unit` uses step `nope`, but no template it inherits defines it"),
+        "unexpected error message: {err}"
+    );
+}
+
+#[test]
 fn build_fails_on_self_dependency() {
     assert_dependency_error(
         "workflow ci { stage build { job compile (dependencies = [build.compile]) { cargo build } } }",
