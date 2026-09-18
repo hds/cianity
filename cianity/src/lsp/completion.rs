@@ -1,22 +1,35 @@
+use std::path::Path;
+
 use ciane::{
-    ast::{AstNode, Attr, AttrValue, HasName, Root, Stage},
+    ast::{AstNode, Attr, AttrValue, HasName, Root},
     parser::Parse,
     syntax::{SyntaxKind, SyntaxNode, SyntaxToken},
 };
 use tower_lsp_server::ls_types::{CompletionItem, CompletionItemKind};
 
+use super::templates;
 use super::util::token_at;
 
+/// Completions at `offset`, resolving imports relative to `file_path`.
 #[must_use]
-pub(super) fn at(parse: &Parse, _source: &str, offset: usize) -> Vec<CompletionItem> {
+pub(super) fn at_path(
+    parse: &Parse,
+    _source: &str,
+    offset: usize,
+    file_path: &Path,
+) -> Vec<CompletionItem> {
     let root_node = parse.syntax();
     let Some(token) = token_at(&root_node, offset) else {
         return Vec::new();
     };
-    completion_for_token(&token, parse)
+    completion_for_token(&token, parse, file_path)
 }
 
-fn completion_for_token(token: &SyntaxToken, parse: &Parse) -> Vec<CompletionItem> {
+fn completion_for_token(
+    token: &SyntaxToken,
+    parse: &Parse,
+    file_path: &Path,
+) -> Vec<CompletionItem> {
     for node in std::iter::successors(token.parent(), SyntaxNode::parent) {
         match node.kind() {
             SyntaxKind::RefList => {
@@ -24,7 +37,7 @@ fn completion_for_token(token: &SyntaxToken, parse: &Parse) -> Vec<CompletionIte
             }
             SyntaxKind::AttrValue => {
                 let key = attrvalue_key(&node);
-                return value_completions(key.as_deref(), &node, parse);
+                return value_completions(key.as_deref(), token, parse, file_path);
             }
             SyntaxKind::Attr => {
                 let Some(attr) = Attr::cast(node.clone()) else {
@@ -40,13 +53,13 @@ fn completion_for_token(token: &SyntaxToken, parse: &Parse) -> Vec<CompletionIte
                     });
                     if past_eq {
                         let key = attr.key_text().map(|s| s.to_string());
-                        return value_completions(key.as_deref(), &node, parse);
+                        return value_completions(key.as_deref(), token, parse, file_path);
                     }
                     let owner = node.parent().and_then(|p| p.parent()).map(|n| n.kind());
                     return attr_name_completions(owner);
                 }
                 let key = attr.key_text().map(|s| s.to_string());
-                return value_completions(key.as_deref(), &node, parse);
+                return value_completions(key.as_deref(), token, parse, file_path);
             }
             SyntaxKind::AttrList => {
                 let owner = node.parent().map(|n| n.kind());
@@ -92,9 +105,14 @@ fn attrvalue_key(attr_value_node: &SyntaxNode) -> Option<String> {
         .map(|s| s.to_string())
 }
 
-fn value_completions(key: Option<&str>, node: &SyntaxNode, parse: &Parse) -> Vec<CompletionItem> {
+fn value_completions(
+    key: Option<&str>,
+    token: &SyntaxToken,
+    parse: &Parse,
+    file_path: &Path,
+) -> Vec<CompletionItem> {
     match key {
-        Some("inherit") => inherit_completions(node, parse),
+        Some("inherit") => inherit_completions(token, parse, file_path),
         Some("strategy") => strategy_completions(),
         _ => Vec::new(),
     }
@@ -116,44 +134,21 @@ fn strategy_completions() -> Vec<CompletionItem> {
     .collect()
 }
 
-fn inherit_completions(from_node: &SyntaxNode, parse: &Parse) -> Vec<CompletionItem> {
-    let Some(stage) = from_node.ancestors().find_map(Stage::cast) else {
-        return all_template_completions(parse);
-    };
-    let Some(body) = stage.body() else {
-        return Vec::new();
-    };
-    body.templates()
-        .filter_map(|t| t.name())
-        .map(|n| template_item(n.as_str()))
-        .collect()
-}
-
-fn all_template_completions(parse: &Parse) -> Vec<CompletionItem> {
+/// Every template that can be inherited from here: the stage's own, the
+/// top-level ones, those in other stages, and those in imported files.
+fn inherit_completions(
+    token: &SyntaxToken,
+    parse: &Parse,
+    file_path: &Path,
+) -> Vec<CompletionItem> {
     let Some(root) = Root::cast(parse.syntax()) else {
         return Vec::new();
     };
-    let mut items = Vec::new();
-    for wdef in root.workflow_defs() {
-        let Some(body) = wdef.body() else {
-            continue;
-        };
-        for tmpl in body.templates() {
-            if let Some(name) = tmpl.name() {
-                items.push(template_item(name.as_str()));
-            }
-        }
-        for stage in body.stages() {
-            let Some(sbody) = stage.body() else {
-                continue;
-            };
-            let names: Vec<_> = sbody.templates().filter_map(|t| t.name()).collect();
-            for name in names {
-                items.push(template_item(name.as_str()));
-            }
-        }
-    }
-    items
+    let context = templates::context_stage(token);
+    templates::visible_refs(&root, file_path, context.as_deref())
+        .iter()
+        .map(|name| template_item(name))
+        .collect()
 }
 
 fn dependency_completions(parse: &Parse) -> Vec<CompletionItem> {

@@ -1,13 +1,13 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use ciane::{
-    ast::{AstNode, Attr, AttrValue, HasName, Ref, Root, Stage, UseDecl},
-    parse,
+    ast::{AstNode, Attr, AttrValue, HasName, Ref, Root, UseDecl},
     parser::Parse,
-    syntax::{SyntaxKind, SyntaxNode, SyntaxToken},
+    syntax::{SyntaxKind, SyntaxToken},
 };
 use tower_lsp_server::ls_types::{Location, Position, Range, Uri};
 
+use super::templates;
 use super::util::{range_to_lsp, token_at};
 
 #[must_use]
@@ -36,43 +36,16 @@ fn resolve_inherit(
     current_uri: &Uri,
     root: &Root,
 ) -> Option<Location> {
-    if token.kind() != SyntaxKind::BareValue {
-        return None;
-    }
-    let attr_value = AttrValue::cast(token.parent()?)?;
-    let attr = Attr::cast(attr_value.syntax().parent()?)?;
-    if attr.key_text().as_deref() != Some("inherit") {
-        return None;
-    }
-    let template_ref = attr.value_text()?;
-
-    if let Some((import_name, template_name)) = template_ref.split_once('/') {
-        // Cross-file: resolve the import, read the target file, find the template.
-        let import_path = resolve_import_path(root, import_name, file_path)?;
-        let target_source = std::fs::read_to_string(&import_path).ok()?;
-        let target_parse = parse(&target_source);
-        let target_root = Root::cast(target_parse.syntax())?;
-        let tmpl = target_root.stages().find_map(|s| {
-            s.body()?
-                .templates()
-                .find(|t| t.name().as_deref() == Some(template_name))
-        })?;
-        let range = range_to_lsp(&target_source, tmpl.name_token()?.text_range());
-        let uri = Uri::from_file_path(&import_path)?;
-        Some(Location { uri, range })
-    } else {
-        // Local: template must be in the same stage.
-        let stage = ancestor_stage(attr.syntax())?;
-        let tmpl = stage
-            .body()?
-            .templates()
-            .find(|t| t.name().as_deref() == Some(template_ref.as_str()))?;
-        let range = range_to_lsp(source, tmpl.name_token()?.text_range());
-        Some(Location {
-            uri: current_uri.clone(),
-            range,
-        })
-    }
+    let template_ref = templates::ref_at(token, root, file_path)?;
+    let def = templates::find_def(&template_ref.id, root, source)?;
+    let uri = match &def.path {
+        Some(path) => Uri::from_file_path(path)?,
+        None => current_uri.clone(),
+    };
+    Some(Location {
+        uri,
+        range: range_to_lsp(&def.source, def.name_range),
+    })
 }
 
 // ─── dependencies ─────────────────────────────────────────────────────────────
@@ -168,19 +141,3 @@ fn resolve_import_name(token: &SyntaxToken, file_path: &Path) -> Option<Location
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
-
-fn resolve_import_path(root: &Root, import_name: &str, file_path: &Path) -> Option<PathBuf> {
-    let base = file_path.parent().unwrap_or(Path::new("."));
-    for imp in root.use_decls() {
-        if imp.name().as_deref() == Some(import_name)
-            && let Some(loc) = imp.path()
-        {
-            return Some(base.join(loc.as_str()));
-        }
-    }
-    None
-}
-
-fn ancestor_stage(node: &SyntaxNode) -> Option<Stage> {
-    node.ancestors().find_map(Stage::cast)
-}

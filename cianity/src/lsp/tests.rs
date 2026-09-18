@@ -46,7 +46,7 @@ fn hover_text(source: &str, offset: usize) -> Option<String> {
 
 fn completion_labels(source: &str, offset: usize) -> Vec<String> {
     let parsed = parse(source);
-    completion::at(&parsed, source, offset)
+    completion::at_path(&parsed, source, offset, Path::new("."))
         .into_iter()
         .map(|item| item.label)
         .collect()
@@ -312,7 +312,7 @@ fn completion_toplevel_offers_workflow() {
 fn completion_toplevel_items_are_keyword_kind() {
     let src = "x";
     let parsed = parse(src);
-    let items = completion::at(&parsed, src, 0);
+    let items = completion::at_path(&parsed, src, 0, Path::new("."));
     assert!(
         items
             .iter()
@@ -680,9 +680,10 @@ fn references_keyword_returns_none() {
 fn template_def_at_returns_name_on_template_declaration() {
     let src = "workflow w { stage s { template myTmpl [] } }";
     let parsed = parse(src);
-    let name = references::template_def_at(&parsed, offset_of(src, "myTmpl"))
+    let id = references::template_def_at(&parsed, offset_of(src, "myTmpl"))
         .expect("expected template name");
-    assert_eq!(name, "myTmpl");
+    assert_eq!(id.name, "myTmpl");
+    assert_eq!(id.stage.as_deref(), Some("s"), "declared inside stage 's'");
 }
 
 #[test]
@@ -692,5 +693,277 @@ fn template_def_at_returns_none_for_non_template_positions() {
     assert!(
         references::template_def_at(&parsed, offset_of(src, "myJob")).is_none(),
         "job name is not a template def"
+    );
+}
+
+// ── cross-stage and cross-file template references ────────────────────────────
+
+/// Writes `workflow.ci` and `shared.ci` into a temp dir, returning the dir and
+/// the path of `workflow.ci`.
+fn workspace_with_import(main: &str, shared: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let main_path = dir.path().join("workflow.ci");
+    std::fs::write(&main_path, main).expect("write workflow.ci");
+    std::fs::write(dir.path().join("shared.ci"), shared).expect("write shared.ci");
+    (dir, main_path)
+}
+
+fn definition_at(
+    src: &str,
+    offset: usize,
+    path: &Path,
+    uri: &Uri,
+) -> Option<tower_lsp_server::ls_types::Location> {
+    let parsed = parse(src);
+    definition::resolve(&parsed, src, offset, path, uri)
+}
+
+#[test]
+fn definition_inherit_resolves_to_top_level_template() {
+    let src = "workflow w {\n    template base []\n    stage s {\n        job j ( inherit = base ) []\n    }\n}";
+    let uri = dummy_uri();
+    let loc = definition_at(
+        src,
+        nth_offset(src, "base", 2),
+        Path::new("/tmp/test.ci"),
+        &uri,
+    )
+    .expect("expected a definition location");
+    assert_eq!(loc.uri, uri);
+    assert_eq!(
+        loc.range.start.line, 1,
+        "template 'base' is declared on line 1"
+    );
+}
+
+#[test]
+fn definition_inherit_resolves_to_template_in_another_stage() {
+    let src = "workflow w {\n    stage build {\n        template base []\n    }\n    stage test {\n        job j ( inherit = build.base ) []\n    }\n}";
+    let uri = dummy_uri();
+    let loc = definition_at(
+        src,
+        offset_of(src, "build.base"),
+        Path::new("/tmp/test.ci"),
+        &uri,
+    )
+    .expect("expected a definition location");
+    assert_eq!(
+        loc.range.start.line, 2,
+        "template 'base' is declared on line 2"
+    );
+}
+
+#[test]
+fn definition_inherit_in_list_resolves_to_template() {
+    let src = "workflow w {\n    template base []\n    template extra []\n    stage s {\n        job j ( inherit = [ base, extra ] ) []\n    }\n}";
+    let uri = dummy_uri();
+    let loc = definition_at(
+        src,
+        nth_offset(src, "extra", 2),
+        Path::new("/tmp/test.ci"),
+        &uri,
+    )
+    .expect("expected a definition location");
+    assert_eq!(
+        loc.range.start.line, 2,
+        "template 'extra' is declared on line 2"
+    );
+}
+
+#[test]
+fn definition_inherit_resolves_cross_file_top_level_template() {
+    let main = "workflow w {\n    use dep ( path = ./shared.ci )\n    stage s {\n        job j ( inherit = dep/base ) []\n    }\n}";
+    let shared = "workflow s\n\ntemplate base []\n";
+    let (dir, main_path) = workspace_with_import(main, shared);
+    let uri = dummy_uri();
+    let loc = definition_at(main, offset_of(main, "dep/base"), &main_path, &uri)
+        .expect("expected a definition location");
+    let expected_uri = Uri::from_file_path(dir.path().join("shared.ci")).expect("uri");
+    assert_eq!(loc.uri, expected_uri, "expected location in shared.ci");
+    assert_eq!(
+        loc.range.start.line, 2,
+        "template 'base' is on line 2 of shared.ci"
+    );
+}
+
+#[test]
+fn definition_inherit_resolves_cross_file_stage_template() {
+    let main = "workflow w {\n    use dep ( path = ./shared.ci )\n    stage s {\n        job j ( inherit = dep/build.helper ) []\n    }\n}";
+    let shared = "workflow s\n\nstage build {\n    template helper []\n}\n";
+    let (dir, main_path) = workspace_with_import(main, shared);
+    let uri = dummy_uri();
+    let loc = definition_at(main, offset_of(main, "dep/build.helper"), &main_path, &uri)
+        .expect("expected a definition location");
+    let expected_uri = Uri::from_file_path(dir.path().join("shared.ci")).expect("uri");
+    assert_eq!(loc.uri, expected_uri, "expected location in shared.ci");
+    assert_eq!(
+        loc.range.start.line, 3,
+        "template 'helper' is on line 3 of shared.ci"
+    );
+}
+
+#[test]
+fn completion_inherit_offers_top_level_and_other_stage_templates() {
+    let src = "workflow w {\n    template base []\n    stage build {\n        template helper []\n    }\n    stage test {\n        template local []\n        job j ( inherit = l ) []\n    }\n}";
+    let labels = completion_labels(src, offset_of(src, "inherit = l") + "inherit = ".len());
+    for expected in ["local", "base", "build.helper"] {
+        assert!(
+            labels.contains(&expected.to_owned()),
+            "expected {expected:?} in labels: {labels:?}"
+        );
+    }
+}
+
+#[test]
+fn completion_inherit_offers_cross_file_templates() {
+    let main = "workflow w {\n    use dep ( path = ./shared.ci )\n    stage s {\n        job j ( inherit = d ) []\n    }\n}";
+    let shared = "workflow s\n\ntemplate base []\n\nstage build {\n    template helper []\n}\n";
+    let (_dir, main_path) = workspace_with_import(main, shared);
+    let parsed = parse(main);
+    let offset = offset_of(main, "inherit = d") + "inherit = ".len();
+    let labels: Vec<String> = completion::at_path(&parsed, main, offset, &main_path)
+        .into_iter()
+        .map(|item| item.label)
+        .collect();
+    for expected in ["dep/base", "dep/build.helper"] {
+        assert!(
+            labels.contains(&expected.to_owned()),
+            "expected {expected:?} in labels: {labels:?}"
+        );
+    }
+}
+
+#[test]
+fn references_top_level_template_finds_inherit_uses_in_all_stages() {
+    let src = "workflow w {\n    template base []\n    stage one { job a ( inherit = base ) [] }\n    stage two { job b ( inherit = base ) [] }\n}";
+    let parsed = parse(src);
+    let uri = dummy_uri();
+    let locs = references::find(
+        &parsed,
+        src,
+        offset_of(src, "base"),
+        false,
+        Path::new("/tmp/test.ci"),
+        &uri,
+    )
+    .expect("expected locations");
+    assert_eq!(locs.len(), 2, "locs: {locs:?}");
+}
+
+#[test]
+fn references_template_finds_qualified_inherit_uses() {
+    let src = "workflow w {\n    stage build { template base [] }\n    stage test { job b ( inherit = build.base ) [] }\n}";
+    let parsed = parse(src);
+    let uri = dummy_uri();
+    let locs = references::find(
+        &parsed,
+        src,
+        offset_of(src, "base"),
+        false,
+        Path::new("/tmp/test.ci"),
+        &uri,
+    )
+    .expect("expected locations");
+    assert_eq!(locs.len(), 1, "locs: {locs:?}");
+    assert_eq!(locs[0].range.start.line, 2, "the reference is on line 2");
+}
+
+#[test]
+fn references_stage_template_shadows_top_level_one() {
+    // `inherit = base` inside stage `one` refers to the stage-local template,
+    // not the top-level one with the same name.
+    let src = "workflow w {\n    template base []\n    stage one {\n        template base []\n        job a ( inherit = base ) []\n    }\n    stage two { job b ( inherit = base ) [] }\n}";
+    let parsed = parse(src);
+    let uri = dummy_uri();
+    let top_level = references::find(
+        &parsed,
+        src,
+        offset_of(src, "base"),
+        false,
+        Path::new("/tmp/test.ci"),
+        &uri,
+    )
+    .expect("expected locations");
+    assert_eq!(top_level.len(), 1, "only stage two's ref: {top_level:?}");
+    assert_eq!(
+        top_level[0].range.start.line, 6,
+        "stage two's ref is on line 6"
+    );
+
+    let stage_local = references::find(
+        &parsed,
+        src,
+        nth_offset(src, "base", 2),
+        false,
+        Path::new("/tmp/test.ci"),
+        &uri,
+    )
+    .expect("expected locations");
+    assert_eq!(
+        stage_local.len(),
+        1,
+        "only stage one's ref: {stage_local:?}"
+    );
+    assert_eq!(
+        stage_local[0].range.start.line, 4,
+        "stage one's ref is on line 4"
+    );
+}
+
+#[test]
+fn rename_top_level_template_propagates_to_inherit_references() {
+    let src = "workflow w {\n    template base []\n    stage one { job a ( inherit = base ) [] }\n    stage two { job b ( inherit = base ) [] }\n}";
+    let parsed = parse(src);
+    let edits = rename::edits_for(&parsed, src, offset_of(src, "base"), "newBase")
+        .expect("expected rename edits");
+    // declaration + 2 inherit references
+    assert_eq!(edits.len(), 3, "edits: {edits:?}");
+    assert!(
+        edits.iter().all(|e| e.new_text == "newBase"),
+        "edits: {edits:?}"
+    );
+}
+
+#[test]
+fn rename_template_renames_only_name_part_of_qualified_ref() {
+    let src = "workflow w {\n    stage build { template base [] }\n    stage test { job b ( inherit = build.base ) [] }\n}";
+    let parsed = parse(src);
+    let edits = rename::edits_for(&parsed, src, offset_of(src, "base"), "newBase")
+        .expect("expected rename edits");
+    assert_eq!(edits.len(), 2, "edits: {edits:?}");
+    let ref_name_offset = offset_of(src, "build.base") + "build.".len();
+    let expected_start = util::offset_to_position(src, ref_name_offset);
+    assert!(
+        edits
+            .iter()
+            .any(|e| e.range.start == expected_start && e.new_text == "newBase"),
+        "expected an edit replacing only the name part at {expected_start:?}: {edits:?}"
+    );
+}
+
+#[test]
+fn rename_stage_propagates_to_qualified_inherit_references() {
+    let src = "workflow w {\n    stage build { template base [] }\n    stage test { job b ( inherit = build.base ) [] }\n}";
+    let parsed = parse(src);
+    let edits = rename::edits_for(&parsed, src, offset_of(src, "build"), "compile")
+        .expect("expected rename edits");
+    // stage declaration + the stage part of the qualified inherit ref
+    assert_eq!(edits.len(), 2, "edits: {edits:?}");
+    assert!(
+        edits.iter().all(|e| e.new_text == "compile"),
+        "edits: {edits:?}"
+    );
+}
+
+#[test]
+fn rename_cross_file_inherit_ref_is_not_offered() {
+    // The template lives in another file, which this edit can't reach.
+    let main = "workflow w {\n    use dep ( path = ./shared.ci )\n    stage s {\n        job j ( inherit = dep/base ) []\n    }\n}";
+    let shared = "workflow s\n\ntemplate base []\n";
+    let (_dir, _main_path) = workspace_with_import(main, shared);
+    let parsed = parse(main);
+    assert!(
+        rename::prepare(&parsed, main, offset_of(main, "dep/base")).is_none(),
+        "cross-file template references should not be renameable"
     );
 }

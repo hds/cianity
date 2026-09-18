@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use ciane::{
     ast::{AstNode, Attr, AttrValue, HasAttrList, HasName, Root, Stage},
     parser::Parse,
@@ -6,16 +8,29 @@ use ciane::{
 use rowan::TextRange;
 use tower_lsp_server::ls_types::{PrepareRenameResponse, TextEdit};
 
+use super::templates::{self, TemplateFile};
 use super::util::{range_to_lsp, token_at};
+
+/// Imports are resolved only to tell a local template reference from one in
+/// another file, which rename doesn't touch, so no real path is needed.
+fn local_path() -> &'static Path {
+    Path::new(".")
+}
 
 /// Returns the rename range and placeholder if the position is renameable.
 #[must_use]
 pub(super) fn prepare(parse: &Parse, source: &str, offset: usize) -> Option<PrepareRenameResponse> {
-    let token = token_at(&parse.syntax(), offset)?;
-    let range = rename_range(&token)?;
+    let root_node = parse.syntax();
+    let token = token_at(&root_node, offset)?;
+    let root = Root::cast(root_node)?;
+    let range = rename_range(&token, &root)?;
+    let placeholder = source
+        .get(usize::from(range.start())..usize::from(range.end()))
+        .unwrap_or_else(|| token.text())
+        .to_owned();
     Some(PrepareRenameResponse::RangeWithPlaceholder {
         range: range_to_lsp(source, range),
-        placeholder: token.text().to_owned(),
+        placeholder,
     })
 }
 
@@ -29,13 +44,13 @@ pub(super) fn edits_for(
 ) -> Option<Vec<TextEdit>> {
     let root_node = parse.syntax();
     let token = token_at(&root_node, offset)?;
-    rename_range(&token)?;
     let root = Root::cast(root_node)?;
+    rename_range(&token, &root)?;
     collect_edits(&token, &root, source, new_name)
 }
 
 /// Returns the text range of the renameable symbol at `token`, or `None`.
-fn rename_range(token: &SyntaxToken) -> Option<TextRange> {
+fn rename_range(token: &SyntaxToken, root: &Root) -> Option<TextRange> {
     if token.kind() == SyntaxKind::Ident {
         let parent = token.parent()?;
         if parent.kind() == SyntaxKind::Name {
@@ -51,15 +66,11 @@ fn rename_range(token: &SyntaxToken) -> Option<TextRange> {
             return Some(token.text_range());
         }
     }
-    if token.kind() == SyntaxKind::BareValue {
-        let attr_key = token
-            .parent()
-            .and_then(AttrValue::cast)
-            .and_then(|av| Attr::cast(av.syntax().parent()?))
-            .and_then(|a| a.key_text());
-        if attr_key.as_deref() == Some("inherit") && !token.text().contains('/') {
-            return Some(token.text_range());
-        }
+    // Only the name part of an `inherit` reference is renamed, and only when
+    // the template is in this file: an edit can't reach another one.
+    let template_ref = templates::ref_at(token, root, local_path())?;
+    if template_ref.id.file == TemplateFile::Current {
+        return Some(template_ref.name_range);
     }
     None
 }
@@ -88,18 +99,51 @@ fn collect_edits(
             return match owner.kind() {
                 SyntaxKind::Stage => Some(edits_rename_stage(token, root, source, new_name)),
                 SyntaxKind::Job => edits_rename_job(token, root, source, new_name),
-                SyntaxKind::TemplateDef => edits_rename_template(token, source, new_name),
+                SyntaxKind::TemplateDef => edits_rename_template(token, root, source, new_name),
                 _ => None,
             };
         }
-        if parent.kind() == SyntaxKind::Ref {
+        if parent.kind() == SyntaxKind::Ref && is_dependency_ref(&parent) {
             return edits_rename_dep_ref(token, &parent, root, source, new_name);
         }
     }
-    if token.kind() == SyntaxKind::BareValue {
-        return edits_rename_inherit_ref(token, source, new_name);
+    edits_rename_inherit_ref(token, root, source, new_name)
+}
+
+/// Rename the template a reference names, updating its declaration and every
+/// other reference to it in this file.
+fn edits_rename_inherit_ref(
+    token: &SyntaxToken,
+    root: &Root,
+    source: &str,
+    new_name: &str,
+) -> Option<Vec<TextEdit>> {
+    let id = templates::ref_at(token, root, local_path())?.id;
+    if id.file != TemplateFile::Current {
+        return None;
     }
-    None
+    Some(edits_for_template(&id, root, source, new_name))
+}
+
+/// The declaration of `id` plus every reference to it in this file.
+fn edits_for_template(
+    id: &templates::TemplateId,
+    root: &Root,
+    source: &str,
+    new_name: &str,
+) -> Vec<TextEdit> {
+    let mut edits = Vec::new();
+    if let Some(def) = templates::find_def(id, root, source)
+        && def.path.is_none()
+    {
+        edits.push(make_edit(source, def.name_range, new_name));
+    }
+    for template_ref in templates::all_refs(root, local_path()) {
+        if &template_ref.id == id {
+            edits.push(make_edit(source, template_ref.name_range, new_name));
+        }
+    }
+    edits
 }
 
 fn edits_rename_stage(
@@ -112,6 +156,15 @@ fn edits_rename_stage(
     let mut edits = vec![make_edit(source, name_token.text_range(), new_name)];
     for tok in dep_ref_stage_tokens(root, old_name) {
         edits.push(make_edit(source, tok.text_range(), new_name));
+    }
+    // `inherit = <stage>.template` references name the stage too.
+    for template_ref in templates::all_refs(root, local_path()) {
+        if template_ref.id.file == TemplateFile::Current
+            && template_ref.id.stage.as_deref() == Some(old_name)
+            && let Some(range) = template_ref.stage_range
+        {
+            edits.push(make_edit(source, range, new_name));
+        }
     }
     edits
 }
@@ -138,46 +191,12 @@ fn edits_rename_job(
 
 fn edits_rename_template(
     name_token: &SyntaxToken,
+    root: &Root,
     source: &str,
     new_name: &str,
 ) -> Option<Vec<TextEdit>> {
-    let old_name = name_token.text();
-    // name_token → Name → TemplateDef → StageBody → Stage
-    let stage = name_token
-        .parent()
-        .and_then(|n| n.parent())
-        .and_then(|n| n.ancestors().find_map(Stage::cast))?;
-    let mut edits = vec![make_edit(source, name_token.text_range(), new_name)];
-    for tok in inherit_tokens_matching(&stage, old_name) {
-        edits.push(make_edit(source, tok.text_range(), new_name));
-    }
-    Some(edits)
-}
-
-fn edits_rename_inherit_ref(
-    token: &SyntaxToken,
-    source: &str,
-    new_name: &str,
-) -> Option<Vec<TextEdit>> {
-    let tmpl_name = token.text();
-    let stage = token
-        .parent()
-        .and_then(|n| n.ancestors().find_map(Stage::cast))?;
-    let mut edits = Vec::new();
-    // Include the declaration if it exists in this stage
-    if let Some(body) = stage.body()
-        && let Some(tmpl) = body
-            .templates()
-            .find(|t| t.name().as_deref() == Some(tmpl_name))
-        && let Some(tok) = tmpl.name_token()
-    {
-        edits.push(make_edit(source, tok.text_range(), new_name));
-    }
-    // Include all inherit references in this stage
-    for tok in inherit_tokens_matching(&stage, tmpl_name) {
-        edits.push(make_edit(source, tok.text_range(), new_name));
-    }
-    Some(edits)
+    let id = templates::def_at(name_token)?;
+    Some(edits_for_template(&id, root, source, new_name))
 }
 
 fn edits_rename_dep_ref(
@@ -250,35 +269,6 @@ fn dep_ref_job_tokens(root: &Root, stage_name: &str, job_name: &str) -> Vec<Synt
             }
         })
         .collect()
-}
-
-fn inherit_tokens_matching(stage: &Stage, tmpl_name: &str) -> Vec<SyntaxToken> {
-    let mut tokens = Vec::new();
-    let Some(body) = stage.body() else {
-        return tokens;
-    };
-    for job in body.jobs() {
-        let Some(al) = job.attr_list() else {
-            continue;
-        };
-        for attr in al.attrs() {
-            if attr.key_text().as_deref() != Some("inherit") {
-                continue;
-            }
-            let Some(av) = attr.value() else {
-                continue;
-            };
-            if let Some(tok) = av
-                .syntax()
-                .children_with_tokens()
-                .find_map(|e| e.into_token().filter(|t| t.kind() == SyntaxKind::BareValue))
-                && tok.text() == tmpl_name
-            {
-                tokens.push(tok);
-            }
-        }
-    }
-    tokens
 }
 
 fn all_dep_ref_pairs(root: &Root) -> Vec<(SyntaxToken, Option<SyntaxToken>)> {

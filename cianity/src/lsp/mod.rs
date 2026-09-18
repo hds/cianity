@@ -7,6 +7,7 @@ mod hover;
 mod references;
 mod rename;
 mod symbols;
+mod templates;
 mod util;
 
 #[cfg(test)]

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, path::Path, sync::Arc};
 
 use ciane::{
     ast::{AstNode, Root},
@@ -137,7 +137,13 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         let offset = util::position_to_offset(source, position);
-        let items = completion::at(parse, source, offset);
+        let file_path = uri.to_file_path();
+        let items = completion::at_path(
+            parse,
+            source,
+            offset,
+            file_path.as_deref().unwrap_or(Path::new(".")),
+        );
         if items.is_empty() {
             return Ok(None);
         }
