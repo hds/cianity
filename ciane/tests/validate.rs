@@ -448,7 +448,7 @@ workflow ci {
 }
 
 #[test]
-fn warning_inherit_references_unknown_template() {
+fn error_inherit_references_unknown_template() {
     assert_has_diagnostic(
         r"
 workflow ci {
@@ -459,13 +459,13 @@ workflow ci {
     }
 }
 ",
-        Severity::Warning,
+        Severity::Error,
         "no template with that name is defined in this stage or at the top level",
     );
 }
 
 #[test]
-fn warning_inherit_unknown_template_no_false_positive_for_cross_workflow() {
+fn inherit_unknown_template_no_false_positive_for_cross_workflow() {
     let diags = run(r"
 workflow ci {
     stage build {
@@ -475,12 +475,12 @@ workflow ci {
     }
 }
 ");
-    let has_unknown_warning = diags.iter().any(|d| {
-        d.severity == Severity::Warning && d.message.contains("no template with that name")
-    });
+    let has_unknown = diags
+        .iter()
+        .any(|d| d.message.contains("no template with that name"));
     assert!(
-        !has_unknown_warning,
-        "cross-workflow `inherit` should not produce an unknown-template warning"
+        !has_unknown,
+        "cross-workflow `inherit` should not be reported as an unknown template"
     );
 }
 
@@ -534,6 +534,61 @@ workflow ci {
     }
 }
 ",
+    );
+}
+
+#[test]
+fn valid_inherit_template_in_another_stage() {
+    assert_no_diagnostics(
+        r"
+workflow ci {
+    stage build {
+        template base [
+            step build { cargo build }
+        ]
+    }
+
+    stage test {
+        job unit ( inherit = build.base ) [
+            steps,
+        ]
+    }
+}
+",
+    );
+}
+
+#[test]
+fn error_inherit_template_missing_from_named_stage() {
+    assert_has_diagnostic(
+        r"
+workflow ci {
+    stage build {
+        template base []
+    }
+
+    stage test {
+        job unit ( inherit = build.nope ) []
+    }
+}
+",
+        Severity::Error,
+        "stage `build` has no template `nope`",
+    );
+}
+
+#[test]
+fn error_inherit_template_from_unknown_stage() {
+    assert_has_diagnostic(
+        r"
+workflow ci {
+    stage test {
+        job unit ( inherit = biuld.base ) []
+    }
+}
+",
+        Severity::Error,
+        "there is no stage `biuld`",
     );
 }
 
@@ -788,7 +843,7 @@ workflow ci {
 }
 
 #[test]
-fn warning_template_inherit_unknown() {
+fn error_template_inherit_unknown() {
     assert_has_diagnostic(
         r"
 workflow ci {
@@ -801,13 +856,13 @@ workflow ci {
     }
 }
 ",
-        Severity::Warning,
+        Severity::Error,
         "template inherits from `nonexistent`, but no template with that name is defined in this scope",
     );
 }
 
 #[test]
-fn warning_job_inherit_list_unknown() {
+fn error_job_inherit_list_unknown() {
     assert_has_diagnostic(
         r"
 workflow ci {
@@ -822,7 +877,7 @@ workflow ci {
     }
 }
 ",
-        Severity::Warning,
+        Severity::Error,
         "job inherits from `nonexistent`, but no template with that name is defined in this stage or at the top level",
     );
 }
@@ -838,12 +893,12 @@ workflow ci {
     }
 }
 ");
-    let has_unknown = diags.iter().any(|d| {
-        d.severity == Severity::Warning && d.message.contains("no template with that name")
-    });
+    let has_unknown = diags
+        .iter()
+        .any(|d| d.message.contains("no template with that name"));
     assert!(
         !has_unknown,
-        "cross-file refs in list inherit should not produce unknown-template warnings"
+        "cross-file refs in list inherit should not be reported as unknown templates"
     );
 }
 

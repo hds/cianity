@@ -1,0 +1,7 @@
+workflow ci {
+    stage test {
+        job unit ( inherit = biuld.base ) [
+            steps,
+        ]
+    }
+}

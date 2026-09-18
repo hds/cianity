@@ -1,0 +1,21 @@
+workflow ci {
+    stage build {
+        template base ( image = rust:1.75 ) [
+            step setup { rustup update }
+        ]
+
+        job compile ( inherit = base ) [
+            steps,
+        ]
+    }
+
+    stage test {
+        template with_nextest ( inherit = build.base ) [
+            step nextest { cargo nextest run }
+        ]
+
+        job unit ( inherit = with_nextest ) [
+            steps,
+        ]
+    }
+}

@@ -1,0 +1,19 @@
+stages:
+  - build
+  - test
+
+compile:
+  stage: build
+  image: "rust:1.75"
+  dependencies: []
+  script:
+    - rustup update
+    - cargo build
+
+unit:
+  stage: test
+  image: "rust:1.75"
+  dependencies: []
+  script:
+    - rustup update
+    - cargo build

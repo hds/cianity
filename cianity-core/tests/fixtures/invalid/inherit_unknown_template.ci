@@ -1,0 +1,9 @@
+workflow ci {
+    stage build {
+        template base []
+
+        job compile ( inherit = nonexistent ) [
+            steps,
+        ]
+    }
+}

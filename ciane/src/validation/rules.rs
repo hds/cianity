@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use rowan::NodeOrToken;
 use smol_str::SmolStr;
@@ -85,13 +85,24 @@ fn check_workflow_def(workflow: &WorkflowDef, diagnostics: &mut Vec<Diagnostic>)
     check_duplicate_workflow_stage_names(&body, diagnostics);
     check_duplicate_workflow_template_names(&body, diagnostics);
     let root_template_names: HashSet<SmolStr> = body.templates().filter_map(|t| t.name()).collect();
+    // Templates per stage, so that `inherit = stage.template` can be checked.
+    let stage_templates: HashMap<SmolStr, HashSet<SmolStr>> = body
+        .stages()
+        .filter_map(|stage| {
+            let names = stage
+                .body()
+                .map(|b| b.templates().filter_map(|t| t.name()).collect())
+                .unwrap_or_default();
+            Some((stage.name()?, names))
+        })
+        .collect();
     for tmpl in body.templates() {
         check_unknown_attrs(&tmpl, "template", VALID_TEMPLATE_ATTRS, diagnostics);
         check_dependencies_attr(&tmpl, diagnostics);
-        check_template_inherit(&tmpl, &root_template_names, diagnostics);
+        check_template_inherit(&tmpl, &root_template_names, &stage_templates, diagnostics);
     }
     for stage in body.stages() {
-        check_stage(&stage, &root_template_names, diagnostics);
+        check_stage(&stage, &root_template_names, &stage_templates, diagnostics);
     }
 }
 
@@ -151,6 +162,7 @@ fn check_duplicate_workflow_template_names(body: &WorkflowBody, diagnostics: &mu
 fn check_stage(
     stage: &Stage,
     root_templates: &HashSet<SmolStr>,
+    stage_templates: &HashMap<SmolStr, HashSet<SmolStr>>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     check_unknown_attrs(stage, "stage", VALID_STAGE_ATTRS, diagnostics);
@@ -160,8 +172,10 @@ fn check_stage(
         return;
     };
 
-    let stage_template_names: HashSet<SmolStr> =
-        body.templates().filter_map(|t| t.name()).collect();
+    let stage_template_names: HashSet<SmolStr> = stage
+        .name()
+        .and_then(|name| stage_templates.get(&name).cloned())
+        .unwrap_or_default();
 
     let all_template_names: HashSet<SmolStr> = stage_template_names
         .iter()
@@ -182,7 +196,7 @@ fn check_stage(
         }
         check_unknown_attrs(&job, "job", VALID_JOB_ATTRS, diagnostics);
         check_dependencies_attr(&job, diagnostics);
-        check_job_steps(&job, &all_template_names, diagnostics);
+        check_job_steps(&job, &all_template_names, stage_templates, diagnostics);
     }
     for tmpl in body.templates() {
         if let Some(name) = tmpl.name()
@@ -196,7 +210,7 @@ fn check_stage(
         }
         check_unknown_attrs(&tmpl, "template", VALID_TEMPLATE_ATTRS, diagnostics);
         check_dependencies_attr(&tmpl, diagnostics);
-        check_template_inherit(&tmpl, &all_template_names, diagnostics);
+        check_template_inherit(&tmpl, &all_template_names, stage_templates, diagnostics);
     }
 }
 
@@ -242,6 +256,7 @@ fn check_dependencies_attr<N: HasAttrList>(node: &N, diagnostics: &mut Vec<Diagn
 fn check_template_inherit(
     tmpl: &TemplateDef,
     template_names: &HashSet<SmolStr>,
+    stage_templates: &HashMap<SmolStr, HashSet<SmolStr>>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let Some(al) = tmpl.attr_list() else { return };
@@ -250,23 +265,64 @@ fn check_template_inherit(
             continue;
         }
         for name in inherit_names_from_attr(&attr) {
-            if !name.contains('/') && !template_names.contains(&name) {
-                diagnostics.push(Diagnostic {
-                    severity: Severity::Warning,
-                    message: format!(
-                        "template inherits from `{name}`, but no template with that name \
-                         is defined in this scope"
-                    ),
-                    span: span_of(attr.syntax()),
-                });
-            }
+            check_inherit_name(
+                &name,
+                "template",
+                "this scope",
+                template_names,
+                stage_templates,
+                &attr,
+                diagnostics,
+            );
         }
     }
+}
+
+/// Report an `inherit` name that doesn't name a template which exists.
+///
+/// `stage.name` names a template in that stage; an unqualified name is looked
+/// up in `unqualified`, the templates usable without a prefix from here.
+/// Cross-file references are checked when the workflow is built.
+fn check_inherit_name(
+    name: &SmolStr,
+    owner: &str,
+    scope: &str,
+    unqualified: &HashSet<SmolStr>,
+    stage_templates: &HashMap<SmolStr, HashSet<SmolStr>>,
+    attr: &Attr,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if name.contains('/') {
+        return;
+    }
+    let message = if let Some((stage_name, template_name)) = name.split_once('.') {
+        match stage_templates.get(stage_name) {
+            None => format!("{owner} inherits from `{name}`, but there is no stage `{stage_name}`"),
+            Some(names) if !names.contains(template_name) => format!(
+                "{owner} inherits from `{name}`, but stage `{stage_name}` has no template \
+                 `{template_name}`"
+            ),
+            Some(_) => return,
+        }
+    } else if unqualified.contains(name) {
+        return;
+    } else {
+        format!(
+            "{owner} inherits from `{name}`, but no template with that name is defined in \
+             {scope}"
+        )
+    };
+    diagnostics.push(Diagnostic {
+        severity: Severity::Error,
+        message,
+        span: span_of(attr.syntax()),
+    });
 }
 
 fn check_job_steps(
     job: &crate::ast::Job,
     template_names: &HashSet<SmolStr>,
+    stage_templates: &HashMap<SmolStr, HashSet<SmolStr>>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let Some(body) = job.steps_body() else {
@@ -284,16 +340,15 @@ fn check_job_steps(
                 continue;
             }
             for name in inherit_names_from_attr(&attr) {
-                if !name.contains('/') && !template_names.contains(&name) {
-                    diagnostics.push(Diagnostic {
-                        severity: Severity::Warning,
-                        message: format!(
-                            "job inherits from `{name}`, but no template with that name \
-                             is defined in this stage or at the top level"
-                        ),
-                        span: span_of(attr.syntax()),
-                    });
-                }
+                check_inherit_name(
+                    &name,
+                    "job",
+                    "this stage or at the top level",
+                    template_names,
+                    stage_templates,
+                    &attr,
+                    diagnostics,
+                );
             }
         }
     }

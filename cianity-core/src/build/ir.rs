@@ -406,58 +406,131 @@ fn template_data_from_ast(tmpl: &ast::TemplateDef) -> TemplateData {
     raw_template_data_from_ast(tmpl).0
 }
 
-/// Resolve one template by name, following its `inherit` chain.
-///
-/// `local` contains raw (unresolved) templates at the current scope.
-/// `parent` contains already-resolved templates from the enclosing scope
-/// (e.g. root-level templates when resolving stage-level templates).
-/// `resolved` is the memoisation cache for the current resolution pass.
-/// `stack` tracks the current resolution path for cycle detection.
-fn resolve_template(
-    name: &str,
-    local: &HashMap<String, RawTemplateEntry>,
-    parent: &HashMap<String, TemplateData>,
-    resolved: &mut HashMap<String, TemplateData>,
-    stack: &mut Vec<String>,
-) -> TemplateData {
-    if let Some(data) = resolved.get(name) {
-        return data.clone();
-    }
-    // Local scope shadows parent scope.
-    let Some(raw) = local.get(name) else {
-        return parent.get(name).cloned().unwrap_or_default();
-    };
-    if stack.iter().any(|n| n == name) {
-        // Circular inheritance — break cycle by contributing nothing.
-        return TemplateData::default();
-    }
-    stack.push(name.to_string());
-    let mut merged = TemplateData::default();
-    for parent_name in &raw.inherit_names {
-        if parent_name.contains('/') {
-            // Cross-file refs are not resolved inside template inheritance chains.
-            continue;
-        }
-        let parent_data = resolve_template(parent_name, local, parent, resolved, stack);
-        merged = merge_template_data(merged, parent_data);
-    }
-    merged = merge_template_data(merged, raw.own.clone());
-    stack.pop();
-    resolved.insert(name.to_string(), merged.clone());
-    merged
+/// Identifies a template within a file: the stage it is defined in, or `None`
+/// for a top-level one.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct TemplateKey {
+    stage: Option<String>,
+    name: String,
 }
 
-/// Resolve all templates in `local`, using `parent` as the enclosing scope.
-fn resolve_all(
-    local: &HashMap<String, RawTemplateEntry>,
-    parent: &HashMap<String, TemplateData>,
-) -> HashMap<String, TemplateData> {
-    let mut resolved = HashMap::new();
-    let mut stack = Vec::new();
-    for name in local.keys() {
-        resolve_template(name, local, parent, &mut resolved, &mut stack);
+/// Every template in a file, with its `inherit` chain already applied.
+struct TemplateScope {
+    resolved: HashMap<TemplateKey, TemplateData>,
+}
+
+impl TemplateScope {
+    /// Resolve every template in the file, top-level and stage-level alike.
+    fn collect(root: &Root) -> Self {
+        let mut raw: HashMap<TemplateKey, RawTemplateEntry> = HashMap::new();
+        let mut add = |stage: Option<String>, tmpl: &ast::TemplateDef| {
+            if let Some(name) = tmpl.name() {
+                let (own, inherit_names) = raw_template_data_from_ast(tmpl);
+                raw.insert(
+                    TemplateKey {
+                        stage,
+                        name: name.to_string(),
+                    },
+                    RawTemplateEntry { own, inherit_names },
+                );
+            }
+        };
+
+        for tmpl in root.templates() {
+            add(None, &tmpl);
+        }
+        for stage in root.stages() {
+            let Some(stage_name) = stage.name() else {
+                continue;
+            };
+            let Some(body) = stage.body() else {
+                continue;
+            };
+            for tmpl in body.templates() {
+                add(Some(stage_name.to_string()), &tmpl);
+            }
+        }
+
+        let mut resolved = HashMap::new();
+        let mut stack = Vec::new();
+        for key in raw.keys() {
+            resolve_key(key, &raw, &mut resolved, &mut stack);
+        }
+        Self { resolved }
     }
-    resolved
+
+    /// The template an `inherit` name written in `context_stage` refers to.
+    fn get(&self, name: &str, context_stage: Option<&str>) -> Option<&TemplateData> {
+        let key = template_key(name, context_stage, |key| self.resolved.contains_key(key))?;
+        self.resolved.get(&key)
+    }
+}
+
+/// The template an `inherit` name refers to from `context_stage`, or `None`
+/// for a cross-file reference, which this can't resolve.
+///
+/// A plain name is the stage's own template when it has one, and a top-level
+/// template otherwise. `stage.name` names a template in another stage.
+fn template_key(
+    name: &str,
+    context_stage: Option<&str>,
+    exists: impl Fn(&TemplateKey) -> bool,
+) -> Option<TemplateKey> {
+    if name.contains('/') {
+        return None;
+    }
+    if let Some((stage_name, template_name)) = name.split_once('.') {
+        return Some(TemplateKey {
+            stage: Some(stage_name.to_owned()),
+            name: template_name.to_owned(),
+        });
+    }
+    let in_stage = TemplateKey {
+        stage: context_stage.map(ToOwned::to_owned),
+        name: name.to_owned(),
+    };
+    if context_stage.is_some() && exists(&in_stage) {
+        return Some(in_stage);
+    }
+    Some(TemplateKey {
+        stage: None,
+        name: name.to_owned(),
+    })
+}
+
+/// Resolve one template, following its `inherit` chain.
+///
+/// `resolved` memoises this pass and `stack` is the current resolution path,
+/// used to break inheritance cycles.
+fn resolve_key(
+    key: &TemplateKey,
+    raw: &HashMap<TemplateKey, RawTemplateEntry>,
+    resolved: &mut HashMap<TemplateKey, TemplateData>,
+    stack: &mut Vec<TemplateKey>,
+) -> TemplateData {
+    if let Some(data) = resolved.get(key) {
+        return data.clone();
+    }
+    let Some(entry) = raw.get(key) else {
+        return TemplateData::default();
+    };
+    if stack.contains(key) {
+        // Circular inheritance — break the cycle by contributing nothing.
+        return TemplateData::default();
+    }
+    stack.push(key.clone());
+    let mut merged = TemplateData::default();
+    for name in &entry.inherit_names {
+        // Cross-file refs are not resolved inside template inheritance chains.
+        if let Some(parent) = template_key(name, key.stage.as_deref(), |k| raw.contains_key(k)) {
+            let data = resolve_key(&parent, raw, resolved, stack);
+            merged = merge_template_data(merged, data);
+        }
+    }
+    merged = merge_template_data(merged, entry.own.clone());
+    stack.pop();
+    resolved.insert(key.clone(), merged.clone());
+    merged
 }
 
 fn strategy_from_root(root: &Root) -> WorkflowStrategy {
@@ -485,7 +558,7 @@ fn strategy_from_str(s: &str) -> WorkflowStrategy {
 #[must_use]
 pub fn lower(root: &Root) -> Workflow {
     let strategy = strategy_from_root(root);
-    let root_templates = collect_root_templates(root);
+    let templates = TemplateScope::collect(root);
     let mut stages = Vec::new();
 
     for stage in root.stages() {
@@ -494,7 +567,6 @@ pub fn lower(root: &Root) -> Workflow {
             continue;
         };
 
-        let stage_templates = collect_local_templates(&body, &root_templates);
         let mut jobs = Vec::new();
 
         for job in body.jobs() {
@@ -514,10 +586,7 @@ pub fn lower(root: &Root) -> Workflow {
                 if name.contains('/') {
                     continue; // No path context; cross-file refs produce empty scripts.
                 }
-                if let Some(td) = stage_templates
-                    .get(name)
-                    .or_else(|| root_templates.get(name))
-                {
+                if let Some(td) = templates.get(name, Some(&stage_name)) {
                     template_data = merge_template_data(template_data, td.clone());
                 }
             }
@@ -596,7 +665,7 @@ pub fn lower_with_path_partial(root: &Root, path: &Path) -> (Workflow, Vec<anyho
     let strategy = strategy_from_root(root);
     let base = path.parent().unwrap_or(Path::new("."));
     let import_map = build_import_map(root, base);
-    let root_templates = collect_root_templates(root);
+    let templates = TemplateScope::collect(root);
     let mut stages = Vec::new();
 
     for stage in root.stages() {
@@ -605,7 +674,6 @@ pub fn lower_with_path_partial(root: &Root, path: &Path) -> (Workflow, Vec<anyho
             continue;
         };
 
-        let stage_templates = collect_local_templates(&body, &root_templates);
         let mut jobs = Vec::new();
 
         for job in body.jobs() {
@@ -638,9 +706,8 @@ pub fn lower_with_path_partial(root: &Root, path: &Path) -> (Workflow, Vec<anyho
                             TemplateData::default()
                         })
                 } else {
-                    stage_templates
-                        .get(name)
-                        .or_else(|| root_templates.get(name))
+                    templates
+                        .get(name, Some(&stage_name))
                         .cloned()
                         .unwrap_or_default()
                 };
@@ -699,33 +766,6 @@ struct JobAttrs {
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
-
-fn collect_root_templates(root: &Root) -> HashMap<String, TemplateData> {
-    let local: HashMap<String, RawTemplateEntry> = root
-        .templates()
-        .filter_map(|t| {
-            let name = t.name()?.to_string();
-            let (own, inherit_names) = raw_template_data_from_ast(&t);
-            Some((name, RawTemplateEntry { own, inherit_names }))
-        })
-        .collect();
-    resolve_all(&local, &HashMap::new())
-}
-
-fn collect_local_templates(
-    body: &ast::StageBody,
-    root_resolved: &HashMap<String, TemplateData>,
-) -> HashMap<String, TemplateData> {
-    let local: HashMap<String, RawTemplateEntry> = body
-        .templates()
-        .filter_map(|t| {
-            let name = t.name()?.to_string();
-            let (own, inherit_names) = raw_template_data_from_ast(&t);
-            Some((name, RawTemplateEntry { own, inherit_names }))
-        })
-        .collect();
-    resolve_all(&local, root_resolved)
-}
 
 fn parse_job_attrs(job: &ast::Job) -> JobAttrs {
     let mut image = None;

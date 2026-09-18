@@ -133,6 +133,16 @@ fn invalid_inherit_stage_template_not_found() {
 }
 
 #[test]
+fn invalid_inherit_unknown_template() {
+    assert_check_fails("inherit_unknown_template");
+}
+
+#[test]
+fn invalid_inherit_unknown_stage() {
+    assert_check_fails("inherit_unknown_stage");
+}
+
+#[test]
 fn invalid_dependency_later_stage() {
     assert_check_fails("dependency_later_stage");
 }
