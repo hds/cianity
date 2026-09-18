@@ -1,0 +1,3 @@
+workflow images
+
+template rust_slim ( image = rust:1.75-slim )

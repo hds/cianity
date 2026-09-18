@@ -1,10 +1,9 @@
-use std::collections::HashMap;
 use std::ops::Range;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use ariadne::{Color, Label, Report, ReportKind, Source};
 use ciane::{
-    ast::{AstNode, HasAttrList, HasName, Root},
+    ast::{AstNode, Attr, AttrList, HasAttrList, HasName, Root},
     error::{Diagnostic, Severity},
     parse,
     validation::validate,
@@ -69,101 +68,36 @@ fn collect_diagnostics(path: &Path, source: &str) -> Vec<Diagnostic> {
 
     if let Some(root) = Root::cast(result.syntax()) {
         diagnostics.extend(validate(&root));
-        check_cross_file_inherits(&root, path, &mut diagnostics);
-        // Error recovery can leave jobs out of the tree, which would make
-        // dependencies on them look like they refer to jobs that don't exist.
+        // Error recovery can leave jobs and templates out of the tree, which
+        // would make references to them look like they don't exist.
         if result.errors().is_empty() {
-            check_dependencies(&root, path, &mut diagnostics);
+            check_resolved_workflow(&root, path, &mut diagnostics);
         }
     }
 
     diagnostics
 }
 
-fn check_cross_file_inherits(root: &Root, path: &Path, diagnostics: &mut Vec<Diagnostic>) {
-    let base = path.parent().unwrap_or(Path::new("."));
-    let imports = build_import_map(root, base);
-
-    for stage in root.stages() {
-        let Some(body) = stage.body() else { continue };
-        for job in body.jobs() {
-            let Some(al) = job.attr_list() else { continue };
-            for attr in al.attrs() {
-                if attr.key_text().as_deref() != Some("inherit") {
-                    continue;
-                }
-                let Some(value) = attr.value_text() else {
-                    continue;
-                };
-                let Some((import_name, template_ref)) = value.split_once('/') else {
-                    continue;
-                };
-                let span = {
-                    let r = attr.syntax().text_range();
-                    usize::from(r.start())..usize::from(r.end())
-                };
-                if let Some(file_path) = imports.get(import_name) {
-                    if file_path.exists() {
-                        // `ns/tmpl` → top-level template; `ns/stage.tmpl` → stage-local
-                        let result =
-                            if let Some((stage_name, tmpl_name)) = template_ref.split_once('.') {
-                                template_exists_in_stage(file_path, stage_name, tmpl_name)
-                            } else {
-                                template_exists_at_top_level(file_path, template_ref)
-                            };
-                        match result {
-                            Ok(true) => {}
-                            Ok(false) => {
-                                diagnostics.push(Diagnostic {
-                                    severity: Severity::Error,
-                                    message: format!(
-                                        "template `{template_ref}` not found \
-                                             in import `{import_name}`"
-                                    ),
-                                    span,
-                                });
-                            }
-                            Err(e) => {
-                                diagnostics.push(Diagnostic {
-                                    severity: Severity::Error,
-                                    message: format!("failed to read import `{import_name}`: {e}"),
-                                    span,
-                                });
-                            }
-                        }
-                    } else {
-                        diagnostics.push(Diagnostic {
-                            severity: Severity::Error,
-                            message: format!(
-                                "import `{import_name}` references `{}`, \
-                                     but that file does not exist",
-                                file_path.display()
-                            ),
-                            span,
-                        });
-                    }
-                } else {
-                    diagnostics.push(Diagnostic {
-                        severity: Severity::Error,
-                        message: format!(
-                            "inherit references import `{import_name}`, but no such \
-                                 import exists in the `use` block"
-                        ),
-                        span,
-                    });
-                }
-            }
-        }
-    }
-}
-
-/// Report dependencies which can't be satisfied.
+/// Report template references that can't be resolved and dependencies that
+/// can't be satisfied.
 ///
-/// Dependencies may be inherited from templates (including ones in other
-/// files), so they're checked on the lowered workflow. Cross-file templates
-/// which can't be resolved are reported by [`check_cross_file_inherits`].
-fn check_dependencies(root: &Root, path: &Path, diagnostics: &mut Vec<Diagnostic>) {
-    let (workflow, _) = lower_with_path_partial(root, path);
+/// Both are checked on the lowered workflow, so that templates inherited from
+/// other files — and the `inherit` chains inside those files — are included.
+fn check_resolved_workflow(root: &Root, path: &Path, diagnostics: &mut Vec<Diagnostic>) {
+    let (workflow, template_errors) = lower_with_path_partial(root, path);
+
+    for err in template_errors {
+        let span = err.file.as_deref().map_or_else(
+            || inherit_ref_span(root, &err.reference),
+            |file| import_span(root, path, file),
+        );
+        diagnostics.push(Diagnostic {
+            severity: Severity::Error,
+            message: err.message,
+            span,
+        });
+    }
+
     for err in dependency_errors(&workflow) {
         diagnostics.push(Diagnostic {
             severity: Severity::Error,
@@ -171,6 +105,56 @@ fn check_dependencies(root: &Root, path: &Path, diagnostics: &mut Vec<Diagnostic
             span: job_dependency_span(root, &err.stage, &err.job),
         });
     }
+}
+
+/// The span of the `inherit` attribute that names `reference`.
+fn inherit_ref_span(root: &Root, reference: &str) -> Range<usize> {
+    inherit_attrs(root)
+        .find(|attr| inherit_names_of(attr).iter().any(|name| name == reference))
+        .map_or(0..0, |attr| span_of(attr.syntax()))
+}
+
+/// The span of the `use` import that brings in `file`.
+fn import_span(root: &Root, path: &Path, file: &Path) -> Range<usize> {
+    let base = path.parent().unwrap_or(Path::new("."));
+    root.use_decls()
+        .find(|imp| {
+            imp.path()
+                .is_some_and(|loc| base.join(loc.as_str()) == file)
+        })
+        .map_or(0..0, |imp| span_of(imp.syntax()))
+}
+
+fn span_of(node: &ciane::syntax::SyntaxNode) -> Range<usize> {
+    let range = node.text_range();
+    usize::from(range.start())..usize::from(range.end())
+}
+
+/// Every `inherit` attribute in the file, on templates and jobs alike.
+fn inherit_attrs(root: &Root) -> impl Iterator<Item = Attr> + '_ {
+    let top_level = root.templates().filter_map(|t| t.attr_list());
+    let in_stages = root.stages().filter_map(|s| s.body()).flat_map(|body| {
+        let jobs: Vec<AttrList> = body.jobs().filter_map(|j| j.attr_list()).collect();
+        let templates: Vec<AttrList> = body.templates().filter_map(|t| t.attr_list()).collect();
+        jobs.into_iter().chain(templates)
+    });
+    top_level
+        .chain(in_stages)
+        .flat_map(|list| list.attrs().collect::<Vec<_>>())
+        .filter(|attr| attr.key_text().as_deref() == Some("inherit"))
+}
+
+/// The template names an `inherit` attribute lists.
+fn inherit_names_of(attr: &Attr) -> Vec<String> {
+    attr.value_text().map_or_else(
+        || {
+            attr.value()
+                .and_then(|value| value.ref_list())
+                .map(|list| list.refs().map(|r| r.text()).collect())
+                .unwrap_or_default()
+        },
+        |value| vec![value.to_string()],
+    )
 }
 
 /// The span of the job's `dependencies` attribute, or its `inherit` attribute
@@ -193,51 +177,6 @@ fn job_dependency_span(root: &Root, stage_name: &str, job_name: &str) -> Range<u
         .or_else(|| attr_named("inherit"))
         .map_or_else(|| job.syntax().text_range(), |a| a.syntax().text_range());
     usize::from(range.start())..usize::from(range.end())
-}
-
-fn build_import_map(root: &Root, base: &Path) -> HashMap<String, PathBuf> {
-    let mut map = HashMap::new();
-    for imp in root.use_decls() {
-        if let Some((name, path)) = imp.name().zip(imp.path()) {
-            map.insert(name.to_string(), base.join(path.as_str()));
-        }
-    }
-    map
-}
-
-/// Check whether a top-level (outside any stage) template with `template_name`
-/// exists in `path`.
-fn template_exists_at_top_level(path: &Path, template_name: &str) -> anyhow::Result<bool> {
-    let source =
-        std::fs::read_to_string(path).map_err(|e| anyhow::anyhow!("cannot read file: {e}"))?;
-    let result = parse(&source);
-    let root =
-        Root::cast(result.syntax()).ok_or_else(|| anyhow::anyhow!("internal: no Root node"))?;
-    Ok(root
-        .templates()
-        .any(|t| t.name().as_deref() == Some(template_name)))
-}
-
-/// Check whether a template named `template_name` exists inside stage
-/// `stage_name` in `path`.
-fn template_exists_in_stage(
-    path: &Path,
-    stage_name: &str,
-    template_name: &str,
-) -> anyhow::Result<bool> {
-    let source =
-        std::fs::read_to_string(path).map_err(|e| anyhow::anyhow!("cannot read file: {e}"))?;
-    let result = parse(&source);
-    let root =
-        Root::cast(result.syntax()).ok_or_else(|| anyhow::anyhow!("internal: no Root node"))?;
-    Ok(root
-        .stages()
-        .find(|s| s.name().as_deref() == Some(stage_name))
-        .and_then(|s| s.body())
-        .is_some_and(|b| {
-            b.templates()
-                .any(|t| t.name().as_deref() == Some(template_name))
-        }))
 }
 
 fn print_diagnostic(filename: &str, source: &str, diag: &Diagnostic) {

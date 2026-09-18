@@ -787,6 +787,38 @@ fn definition_inherit_resolves_cross_file_top_level_template() {
 }
 
 #[test]
+fn definition_inherit_on_template_resolves_cross_file() {
+    let main = "workflow w {\n    use dep ( path = ./shared.ci )\n    template local ( inherit = dep/base ) []\n    stage s {\n        job j ( inherit = local ) []\n    }\n}";
+    let shared = "workflow s\n\ntemplate base []\n";
+    let (dir, main_path) = workspace_with_import(main, shared);
+    let uri = dummy_uri();
+    let loc = definition_at(main, offset_of(main, "dep/base"), &main_path, &uri)
+        .expect("expected a definition location");
+    let expected_uri = Uri::from_file_path(dir.path().join("shared.ci")).expect("uri");
+    assert_eq!(loc.uri, expected_uri, "expected location in shared.ci");
+    assert_eq!(
+        loc.range.start.line, 2,
+        "template 'base' is on line 2 of shared.ci"
+    );
+}
+
+#[test]
+fn definition_inherit_in_list_resolves_cross_file() {
+    let main = "workflow w {\n    use dep ( path = ./shared.ci )\n    stage s {\n        job j ( inherit = [ dep/base ] ) []\n    }\n}";
+    let shared = "workflow s\n\ntemplate base []\n";
+    let (dir, main_path) = workspace_with_import(main, shared);
+    let uri = dummy_uri();
+    let loc = definition_at(main, offset_of(main, "dep/base") + 4, &main_path, &uri)
+        .expect("expected a definition location");
+    let expected_uri = Uri::from_file_path(dir.path().join("shared.ci")).expect("uri");
+    assert_eq!(loc.uri, expected_uri, "expected location in shared.ci");
+    assert_eq!(
+        loc.range.start.line, 2,
+        "template 'base' is on line 2 of shared.ci"
+    );
+}
+
+#[test]
 fn definition_inherit_resolves_cross_file_stage_template() {
     let main = "workflow w {\n    use dep ( path = ./shared.ci )\n    stage s {\n        job j ( inherit = dep/build.helper ) []\n    }\n}";
     let shared = "workflow s\n\nstage build {\n    template helper []\n}\n";

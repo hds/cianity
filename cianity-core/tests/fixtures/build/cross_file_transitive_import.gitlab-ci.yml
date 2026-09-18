@@ -1,0 +1,9 @@
+stages:
+  - test
+
+unit:
+  stage: test
+  image: "rust:1.75-slim"
+  dependencies: []
+  script:
+    - cargo build

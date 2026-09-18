@@ -1,0 +1,11 @@
+workflow ci {
+    use shared ( path = ../shared/templates.ci )
+
+    template local ( inherit = shared/not_there )
+
+    stage test {
+        job unit ( inherit = local ) [
+            steps,
+        ]
+    }
+}

@@ -402,10 +402,6 @@ fn raw_template_data_from_ast(tmpl: &ast::TemplateDef) -> (TemplateData, Vec<Str
     )
 }
 
-fn template_data_from_ast(tmpl: &ast::TemplateDef) -> TemplateData {
-    raw_template_data_from_ast(tmpl).0
-}
-
 /// Identifies a template within a file: the stage it is defined in, or `None`
 /// for a top-level one.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -414,14 +410,25 @@ struct TemplateKey {
     name: String,
 }
 
-/// Every template in a file, with its `inherit` chain already applied.
-struct TemplateScope {
-    resolved: HashMap<TemplateKey, TemplateData>,
+/// A template reference that couldn't be resolved.
+#[derive(Debug)]
+pub struct TemplateError {
+    /// The reference as written, e.g. `shared/base`.
+    pub reference: String,
+    /// The file the reference is written in, when it isn't the root file.
+    pub file: Option<PathBuf>,
+    pub message: String,
 }
 
-impl TemplateScope {
-    /// Resolve every template in the file, top-level and stage-level alike.
-    fn collect(root: &Root) -> Self {
+/// The templates and imports of one file.
+#[derive(Default)]
+struct FileTemplates {
+    raw: HashMap<TemplateKey, RawTemplateEntry>,
+    imports: HashMap<String, PathBuf>,
+}
+
+impl FileTemplates {
+    fn from_root(root: &Root, path: &Path) -> Self {
         let mut raw: HashMap<TemplateKey, RawTemplateEntry> = HashMap::new();
         let mut add = |stage: Option<String>, tmpl: &ast::TemplateDef| {
             if let Some(name) = tmpl.name() {
@@ -451,86 +458,224 @@ impl TemplateScope {
             }
         }
 
-        let mut resolved = HashMap::new();
-        let mut stack = Vec::new();
-        for key in raw.keys() {
-            resolve_key(key, &raw, &mut resolved, &mut stack);
+        let base = path.parent().unwrap_or(Path::new("."));
+        let imports = root
+            .use_decls()
+            .filter_map(|imp| Some((imp.name()?.to_string(), base.join(imp.path()?.as_str()))))
+            .collect();
+
+        Self { raw, imports }
+    }
+}
+
+/// Resolves `inherit` references, reading imported files as it goes.
+///
+/// Templates are resolved in the file they are written in, so an imported
+/// template's own `inherit` chain — including references through that file's
+/// `use` imports — is applied before it reaches the job inheriting it.
+struct TemplateResolver {
+    root: PathBuf,
+    files: HashMap<PathBuf, FileTemplates>,
+    resolved: HashMap<(PathBuf, TemplateKey), TemplateData>,
+    /// The resolution path, used to break inheritance cycles.
+    stack: Vec<(PathBuf, TemplateKey)>,
+    /// Whether references into other files may be followed.
+    imports_allowed: bool,
+    errors: Vec<TemplateError>,
+}
+
+impl TemplateResolver {
+    fn new(root: &Root, path: &Path, imports_allowed: bool) -> Self {
+        let mut files = HashMap::new();
+        files.insert(path.to_path_buf(), FileTemplates::from_root(root, path));
+        Self {
+            root: path.to_path_buf(),
+            files,
+            resolved: HashMap::new(),
+            stack: Vec::new(),
+            imports_allowed,
+            errors: Vec::new(),
         }
-        Self { resolved }
     }
 
-    /// The template an `inherit` name written in `context_stage` refers to.
-    fn get(&self, name: &str, context_stage: Option<&str>) -> Option<&TemplateData> {
-        let key = template_key(name, context_stage, |key| self.resolved.contains_key(key))?;
-        self.resolved.get(&key)
+    /// What an `inherit` name written in `file` inside `context_stage`
+    /// contributes to the thing inheriting it.
+    fn resolve(&mut self, file: &Path, name: &str, context_stage: Option<&str>) -> TemplateData {
+        let Some((target_file, key)) = self.target_of(file, name, context_stage) else {
+            return TemplateData::default();
+        };
+        self.resolve_key(&target_file, &key)
     }
-}
 
-/// The template an `inherit` name refers to from `context_stage`, or `None`
-/// for a cross-file reference, which this can't resolve.
-///
-/// A plain name is the stage's own template when it has one, and a top-level
-/// template otherwise. `stage.name` names a template in another stage.
-fn template_key(
-    name: &str,
-    context_stage: Option<&str>,
-    exists: impl Fn(&TemplateKey) -> bool,
-) -> Option<TemplateKey> {
-    if name.contains('/') {
-        return None;
+    /// The file and template an `inherit` name refers to, reporting an error
+    /// if a cross-file reference can't be followed.
+    fn target_of(
+        &mut self,
+        file: &Path,
+        name: &str,
+        context_stage: Option<&str>,
+    ) -> Option<(PathBuf, TemplateKey)> {
+        let Some((import_name, rest)) = name.split_once('/') else {
+            return Some((
+                file.to_path_buf(),
+                self.local_key(file, name, context_stage),
+            ));
+        };
+        if !self.imports_allowed {
+            return None;
+        }
+        let Some(import_path) = self
+            .files
+            .get(file)
+            .and_then(|f| f.imports.get(import_name))
+            .cloned()
+        else {
+            self.error(
+                file,
+                name,
+                format!(
+                    "inherit references import `{import_name}`, but no such import exists in \
+                     the `use` block"
+                ),
+            );
+            return None;
+        };
+        if !self.load(&import_path) {
+            self.error(
+                file,
+                name,
+                format!(
+                    "import `{import_name}` references `{}`, but that file cannot be read",
+                    import_path.display()
+                ),
+            );
+            return None;
+        }
+        let key = match rest.split_once('.') {
+            Some((stage_name, template_name)) => TemplateKey {
+                stage: Some(stage_name.to_owned()),
+                name: template_name.to_owned(),
+            },
+            None => TemplateKey {
+                stage: None,
+                name: rest.to_owned(),
+            },
+        };
+        if !self.files[&import_path].raw.contains_key(&key) {
+            let message = match &key.stage {
+                Some(stage_name) => format!(
+                    "template `{}` not found in stage `{stage_name}` of import `{import_name}`",
+                    key.name
+                ),
+                None => format!(
+                    "top-level template `{}` not found in import `{import_name}`",
+                    key.name
+                ),
+            };
+            self.error(file, name, message);
+            return None;
+        }
+        Some((import_path, key))
     }
-    if let Some((stage_name, template_name)) = name.split_once('.') {
-        return Some(TemplateKey {
-            stage: Some(stage_name.to_owned()),
-            name: template_name.to_owned(),
-        });
-    }
-    let in_stage = TemplateKey {
-        stage: context_stage.map(ToOwned::to_owned),
-        name: name.to_owned(),
-    };
-    if context_stage.is_some() && exists(&in_stage) {
-        return Some(in_stage);
-    }
-    Some(TemplateKey {
-        stage: None,
-        name: name.to_owned(),
-    })
-}
 
-/// Resolve one template, following its `inherit` chain.
-///
-/// `resolved` memoises this pass and `stack` is the current resolution path,
-/// used to break inheritance cycles.
-fn resolve_key(
-    key: &TemplateKey,
-    raw: &HashMap<TemplateKey, RawTemplateEntry>,
-    resolved: &mut HashMap<TemplateKey, TemplateData>,
-    stack: &mut Vec<TemplateKey>,
-) -> TemplateData {
-    if let Some(data) = resolved.get(key) {
-        return data.clone();
+    /// An unqualified name is the stage's own template when it has one, and a
+    /// top-level template otherwise. `stage.name` names another stage's.
+    fn local_key(&self, file: &Path, name: &str, context_stage: Option<&str>) -> TemplateKey {
+        if let Some((stage_name, template_name)) = name.split_once('.') {
+            return TemplateKey {
+                stage: Some(stage_name.to_owned()),
+                name: template_name.to_owned(),
+            };
+        }
+        let in_stage = TemplateKey {
+            stage: context_stage.map(ToOwned::to_owned),
+            name: name.to_owned(),
+        };
+        if context_stage.is_some()
+            && self
+                .files
+                .get(file)
+                .is_some_and(|f| f.raw.contains_key(&in_stage))
+        {
+            return in_stage;
+        }
+        TemplateKey {
+            stage: None,
+            name: name.to_owned(),
+        }
     }
-    let Some(entry) = raw.get(key) else {
-        return TemplateData::default();
-    };
-    if stack.contains(key) {
-        // Circular inheritance — break the cycle by contributing nothing.
-        return TemplateData::default();
-    }
-    stack.push(key.clone());
-    let mut merged = TemplateData::default();
-    for name in &entry.inherit_names {
-        // Cross-file refs are not resolved inside template inheritance chains.
-        if let Some(parent) = template_key(name, key.stage.as_deref(), |k| raw.contains_key(k)) {
-            let data = resolve_key(&parent, raw, resolved, stack);
+
+    /// Resolve one template, applying its own `inherit` chain first.
+    ///
+    /// A template that doesn't exist contributes nothing; within a file that
+    /// is reported by `ciane` validation.
+    fn resolve_key(&mut self, file: &Path, key: &TemplateKey) -> TemplateData {
+        let id = (file.to_path_buf(), key.clone());
+        if let Some(data) = self.resolved.get(&id) {
+            return data.clone();
+        }
+        if self.stack.contains(&id) {
+            // Circular inheritance — break the cycle by contributing nothing.
+            return TemplateData::default();
+        }
+        let Some(entry) = self.files.get(file).and_then(|f| f.raw.get(key)) else {
+            return TemplateData::default();
+        };
+        let own = entry.own.clone();
+        let inherit_names = entry.inherit_names.clone();
+
+        self.stack.push(id.clone());
+        let mut merged = TemplateData::default();
+        for parent in &inherit_names {
+            let data = self.resolve(file, parent, key.stage.as_deref());
             merged = merge_template_data(merged, data);
         }
+        merged = merge_template_data(merged, own);
+        self.stack.pop();
+
+        self.resolved.insert(id, merged.clone());
+        merged
     }
-    merged = merge_template_data(merged, entry.own.clone());
-    stack.pop();
-    resolved.insert(key.clone(), merged.clone());
-    merged
+
+    /// Read and parse an imported file, keeping it for later references.
+    fn load(&mut self, path: &Path) -> bool {
+        if self.files.contains_key(path) {
+            return true;
+        }
+        let Ok(source) = std::fs::read_to_string(path) else {
+            return false;
+        };
+        let Some(root) = Root::cast(parse(&source).syntax()) else {
+            return false;
+        };
+        self.files
+            .insert(path.to_path_buf(), FileTemplates::from_root(&root, path));
+        true
+    }
+
+    fn error(&mut self, file: &Path, reference: &str, message: String) {
+        let (file, message) = if file == self.root {
+            (None, message)
+        } else {
+            (
+                Some(file.to_path_buf()),
+                format!("in `{}`: {message}", file.display()),
+            )
+        };
+        let error = TemplateError {
+            reference: reference.to_owned(),
+            file,
+            message,
+        };
+        // The same reference is resolved once per job that inherits it.
+        if !self
+            .errors
+            .iter()
+            .any(|e| e.reference == error.reference && e.message == error.message)
+        {
+            self.errors.push(error);
+        }
+    }
 }
 
 fn strategy_from_root(root: &Root) -> WorkflowStrategy {
@@ -554,82 +699,12 @@ fn strategy_from_str(s: &str) -> WorkflowStrategy {
 /// Lower a parsed `Root` AST node into the rich IR `Workflow`.
 ///
 /// Templates are resolved and inlined into their jobs; the returned `Workflow`
-/// contains only concrete jobs.
+/// contains only concrete jobs. Cross-file references are not resolved, as
+/// there is no file to resolve imports against; use [`lower_with_path`] when
+/// the source came from a file.
 #[must_use]
 pub fn lower(root: &Root) -> Workflow {
-    let strategy = strategy_from_root(root);
-    let templates = TemplateScope::collect(root);
-    let mut stages = Vec::new();
-
-    for stage in root.stages() {
-        let stage_name = stage.name().map_or_else(String::new, |s| s.to_string());
-        let Some(body) = stage.body() else {
-            continue;
-        };
-
-        let mut jobs = Vec::new();
-
-        for job in body.jobs() {
-            let job_name = job.name().map_or_else(String::new, |s| s.to_string());
-            let JobAttrs {
-                mut image,
-                inherit_names,
-                mut needs,
-                mut artifacts,
-                mut env,
-                mut variables,
-                unset_variables,
-            } = parse_job_attrs(&job);
-
-            let mut template_data = TemplateData::default();
-            for name in &inherit_names {
-                if name.contains('/') {
-                    continue; // No path context; cross-file refs produce empty scripts.
-                }
-                if let Some(td) = templates.get(name, Some(&stage_name)) {
-                    template_data = merge_template_data(template_data, td.clone());
-                }
-            }
-
-            if image.is_none() {
-                image.clone_from(&template_data.image);
-            }
-            if needs.is_empty() {
-                needs.clone_from(&template_data.needs);
-            }
-            let mut merged_artifacts = template_data.artifacts.clone();
-            merged_artifacts.extend(artifacts);
-            artifacts = merged_artifacts;
-            if env.is_empty() {
-                env.clone_from(&template_data.env);
-            }
-            let mut base_vars = template_data.variables.clone();
-            for key in &unset_variables {
-                base_vars.retain(|(k, _)| k != key);
-            }
-            variables = merge_variables(base_vars, variables);
-
-            let script = job_script(&job, &template_data.steps);
-
-            jobs.push(Job {
-                name: job_name,
-                stage: stage_name.clone(),
-                image,
-                script,
-                needs,
-                artifacts,
-                env,
-                variables,
-            });
-        }
-
-        stages.push(Stage {
-            name: stage_name,
-            jobs,
-        });
-    }
-
-    Workflow { stages, strategy }
+    lower_inner(root, Path::new(""), false).0
 }
 
 /// Lower a parsed `Root` into a `Workflow`, resolving cross-file template
@@ -648,24 +723,25 @@ pub fn lower(root: &Root) -> Workflow {
 pub fn lower_with_path(root: &Root, path: &Path) -> anyhow::Result<Workflow> {
     let (workflow, errors) = lower_with_path_partial(root, path);
     match errors.into_iter().next() {
-        Some(err) => Err(err),
+        Some(err) => Err(anyhow::anyhow!(err.message)),
         None => Ok(workflow),
     }
 }
 
 /// Lower a parsed `Root` into a `Workflow` like [`lower_with_path`], but
-/// without stopping at cross-file templates which can't be resolved.
+/// without stopping at references which can't be resolved.
 ///
-/// Each such template contributes nothing to the jobs inheriting from it, and
-/// the reason it couldn't be resolved is returned alongside the workflow. This
-/// allows the rest of the workflow to be checked in the same pass.
+/// Each such reference contributes nothing to the job or template inheriting
+/// it, and the reason is returned alongside the workflow. This allows the rest
+/// of the workflow to be checked in the same pass.
 #[must_use]
-pub fn lower_with_path_partial(root: &Root, path: &Path) -> (Workflow, Vec<anyhow::Error>) {
-    let mut errors = Vec::new();
+pub fn lower_with_path_partial(root: &Root, path: &Path) -> (Workflow, Vec<TemplateError>) {
+    lower_inner(root, path, true)
+}
+
+fn lower_inner(root: &Root, path: &Path, imports_allowed: bool) -> (Workflow, Vec<TemplateError>) {
     let strategy = strategy_from_root(root);
-    let base = path.parent().unwrap_or(Path::new("."));
-    let import_map = build_import_map(root, base);
-    let templates = TemplateScope::collect(root);
+    let mut resolver = TemplateResolver::new(root, path, imports_allowed);
     let mut stages = Vec::new();
 
     for stage in root.stages() {
@@ -675,7 +751,6 @@ pub fn lower_with_path_partial(root: &Root, path: &Path) -> (Workflow, Vec<anyho
         };
 
         let mut jobs = Vec::new();
-
         for job in body.jobs() {
             let job_name = job.name().map_or_else(String::new, |s| s.to_string());
             let JobAttrs {
@@ -690,28 +765,8 @@ pub fn lower_with_path_partial(root: &Root, path: &Path) -> (Workflow, Vec<anyho
 
             let mut template_data = TemplateData::default();
             for name in &inherit_names {
-                let td = if let Some((import_name, template_ref)) = name.split_once('/') {
-                    import_map
-                        .get(import_name)
-                        .ok_or_else(|| anyhow::anyhow!("unknown import `{import_name}`"))
-                        .and_then(|file_path| {
-                            if let Some((sname, tname)) = template_ref.split_once('.') {
-                                load_cross_file_stage_template(file_path, sname, tname)
-                            } else {
-                                load_cross_file_top_level_template(file_path, template_ref)
-                            }
-                        })
-                        .unwrap_or_else(|err| {
-                            errors.push(err);
-                            TemplateData::default()
-                        })
-                } else {
-                    templates
-                        .get(name, Some(&stage_name))
-                        .cloned()
-                        .unwrap_or_default()
-                };
-                template_data = merge_template_data(template_data, td);
+                let data = resolver.resolve(path, name, Some(&stage_name));
+                template_data = merge_template_data(template_data, data);
             }
 
             if image.is_none() {
@@ -752,7 +807,7 @@ pub fn lower_with_path_partial(root: &Root, path: &Path) -> (Workflow, Vec<anyho
         });
     }
 
-    (Workflow { stages, strategy }, errors)
+    (Workflow { stages, strategy }, resolver.errors)
 }
 
 struct JobAttrs {
@@ -858,64 +913,6 @@ fn job_script(job: &ast::Job, template_steps: &[(String, String)]) -> Vec<String
     } else {
         Vec::new()
     }
-}
-
-fn build_import_map(root: &Root, base: &Path) -> HashMap<String, PathBuf> {
-    let mut map = HashMap::new();
-    for imp in root.use_decls() {
-        if let Some((name, path)) = imp.name().zip(imp.path()) {
-            map.insert(name.to_string(), base.join(path.as_str()));
-        }
-    }
-    map
-}
-
-fn load_cross_file_top_level_template(
-    path: &Path,
-    template_name: &str,
-) -> anyhow::Result<TemplateData> {
-    let source = std::fs::read_to_string(path)
-        .map_err(|e| anyhow::anyhow!("cannot read {}: {e}", path.display()))?;
-    let result = parse(&source);
-    let root =
-        Root::cast(result.syntax()).ok_or_else(|| anyhow::anyhow!("internal: no Root node"))?;
-    for tmpl in root.templates() {
-        if tmpl.name().as_deref() == Some(template_name) {
-            return Ok(template_data_from_ast(&tmpl));
-        }
-    }
-    anyhow::bail!(
-        "top-level template `{template_name}` not found in `{}`",
-        path.display()
-    )
-}
-
-fn load_cross_file_stage_template(
-    path: &Path,
-    stage_name: &str,
-    template_name: &str,
-) -> anyhow::Result<TemplateData> {
-    let source = std::fs::read_to_string(path)
-        .map_err(|e| anyhow::anyhow!("cannot read {}: {e}", path.display()))?;
-    let result = parse(&source);
-    let root =
-        Root::cast(result.syntax()).ok_or_else(|| anyhow::anyhow!("internal: no Root node"))?;
-    for stage in root.stages() {
-        if stage.name().as_deref() != Some(stage_name) {
-            continue;
-        }
-        if let Some(body) = stage.body() {
-            for tmpl in body.templates() {
-                if tmpl.name().as_deref() == Some(template_name) {
-                    return Ok(template_data_from_ast(&tmpl));
-                }
-            }
-        }
-    }
-    anyhow::bail!(
-        "template `{template_name}` not found in stage `{stage_name}` of `{}`",
-        path.display()
-    )
 }
 
 fn collect_template_steps(body: &JobBodySteps) -> Vec<(String, String)> {

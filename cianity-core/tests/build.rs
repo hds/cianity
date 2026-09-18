@@ -25,6 +25,9 @@
 //! | `top_level_template_inherit` | job inherits from a top-level template defined outside any stage |
 //! | `cross_file_stage_template` | `ns/stage.tmpl` syntax resolves a template inside a named stage in another file |
 //! | `template_deps_inherit` | template `dependencies` attr propagates to inheriting job; job `dependencies` overrides template |
+//! | `cross_file_template_chain` | imported template's own `inherit` chain is applied |
+//! | `cross_file_template_on_template` | a template in this file inherits one from another file |
+//! | `cross_file_transitive_import` | imported template inherits through that file's own `use` import |
 //! | `cross_stage_template_inherit` | job inherits `stage.template` from another stage |
 //! | `cross_stage_template_chain` | template inherits `stage.template` from another stage, then a job inherits that |
 //! | `multi_inherit_spaced` | formatter-style `inherit = [ a, b ]` list; whitespace before `]` doesn't break the last template name |
@@ -155,6 +158,21 @@ fn build_strategy_none() {
 #[test]
 fn build_template_inherit() {
     assert_gitlab_snapshot("template_inherit");
+}
+
+#[test]
+fn build_cross_file_template_chain() {
+    assert_gitlab_snapshot("cross_file_template_chain");
+}
+
+#[test]
+fn build_cross_file_template_on_template() {
+    assert_gitlab_snapshot("cross_file_template_on_template");
+}
+
+#[test]
+fn build_cross_file_transitive_import() {
+    assert_gitlab_snapshot("cross_file_transitive_import");
 }
 
 #[test]
@@ -297,7 +315,7 @@ fn build_reports_all_errors_from_file_together() {
         "unknown attribute `foo` on job",
         "dependency `compile` must be written as `stage.job`",
         "dependency `build.compile.extra` must be written as `stage.job`",
-        "unknown import `missing`",
+        "inherit references import `missing`, but no such import exists",
         "job `build.lint` depends on `build.compiel`, but stage `build` has no job `compiel`",
         "job `build.lint` depends on `test.unit` in later stage `test`",
     ] {

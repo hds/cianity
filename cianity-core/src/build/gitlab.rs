@@ -55,13 +55,13 @@ fn parse_root(source: &str) -> anyhow::Result<Root> {
 fn ensure_no_errors(
     root: &Root,
     workflow: &Workflow,
-    lower_errors: &[anyhow::Error],
+    lower_errors: &[ir::TemplateError],
 ) -> anyhow::Result<()> {
     let msgs: Vec<String> = validate(root)
         .into_iter()
         .filter(|d| d.severity == Severity::Error)
         .map(|d| d.message)
-        .chain(lower_errors.iter().map(ToString::to_string))
+        .chain(lower_errors.iter().map(|e| e.message.clone()))
         .chain(
             ir::dependency_errors(workflow)
                 .into_iter()

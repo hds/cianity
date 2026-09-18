@@ -1,9 +1,19 @@
 workflow shared {
+    use images ( path = ./images.ci )
+
     template base [
         step setup { rustup update }
         step run { cargo test }
     ]
-    
+
+    template derived ( inherit = base ) [
+        step lint { cargo clippy }
+    ]
+
+    template with_image ( inherit = images/rust_slim ) [
+        step build { cargo build }
+    ]
+
     stage extra {
         template integration [
             step setup { rustup update }

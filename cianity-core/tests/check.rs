@@ -86,6 +86,11 @@ fn valid_variables_unset() {
 }
 
 #[test]
+fn valid_cross_file_template_on_template() {
+    assert_check_passes("cross_file_template_on_template");
+}
+
+#[test]
 fn valid_dependency_same_stage() {
     assert_check_passes("dependency_same_stage");
 }
@@ -130,6 +135,16 @@ fn invalid_inherit_template_not_in_file() {
 #[test]
 fn invalid_inherit_stage_template_not_found() {
     assert_check_fails("inherit_stage_template_not_found");
+}
+
+#[test]
+fn invalid_inherit_cross_file_missing_in_list() {
+    assert_check_fails("inherit_cross_file_missing_in_list");
+}
+
+#[test]
+fn invalid_inherit_cross_file_missing_on_template() {
+    assert_check_fails("inherit_cross_file_missing_on_template");
 }
 
 #[test]

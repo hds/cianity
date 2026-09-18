@@ -1,0 +1,10 @@
+stages:
+  - test
+
+unit:
+  stage: test
+  dependencies: []
+  script:
+    - rustup update
+    - cargo test
+    - cargo clippy

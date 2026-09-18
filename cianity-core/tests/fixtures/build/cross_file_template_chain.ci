@@ -1,0 +1,9 @@
+workflow ci {
+    use shared ( path = ../shared/templates.ci )
+
+    stage test {
+        job unit ( inherit = shared/derived ) [
+            steps,
+        ]
+    }
+}
