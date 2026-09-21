@@ -545,6 +545,55 @@ workflow ci {
 }
 
 #[test]
+fn valid_inline_body_job_inherits_existing_template() {
+    assert_no_diagnostics(
+        r"
+workflow ci {
+    template base ( image = rust:1.96 )
+
+    stage build {
+        job compile ( inherit = base ) { cargo build }
+    }
+}
+",
+    );
+}
+
+#[test]
+fn error_inline_body_job_inherits_unknown_template() {
+    assert_has_diagnostic(
+        r"
+workflow ci {
+    stage build {
+        job compile ( inherit = nonexistent ) { cargo build }
+    }
+}
+",
+        Severity::Error,
+        "job inherits from `nonexistent`, but no template with that name is defined",
+    );
+}
+
+#[test]
+fn error_inline_body_job_inherits_unknown_stage_template() {
+    assert_has_diagnostic(
+        r"
+workflow ci {
+    stage build {
+        template base []
+    }
+
+    stage test {
+        job unit ( inherit = build.nope ) { cargo test }
+    }
+}
+",
+        Severity::Error,
+        "stage `build` has no template `nope`",
+    );
+}
+
+#[test]
 fn error_inherit_references_unknown_template() {
     assert_has_diagnostic(
         r"

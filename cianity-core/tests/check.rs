@@ -168,6 +168,11 @@ fn invalid_step_reference_without_inherit() {
 }
 
 #[test]
+fn invalid_inherit_unknown_template_inline_body() {
+    assert_check_fails("inherit_unknown_template_inline_body");
+}
+
+#[test]
 fn invalid_inherit_unknown_template() {
     assert_check_fails("inherit_unknown_template");
 }

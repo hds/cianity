@@ -197,7 +197,8 @@ fn check_stage(
         }
         check_unknown_attrs(&job, "job", VALID_JOB_ATTRS, diagnostics);
         check_dependencies_attr(&job, diagnostics);
-        check_job_steps(&job, &all_template_names, stage_templates, diagnostics);
+        check_job_inherit(&job, &all_template_names, stage_templates, diagnostics);
+        check_job_steps(&job, diagnostics);
     }
     for tmpl in body.templates() {
         if let Some(name) = tmpl.name()
@@ -367,40 +368,39 @@ fn check_inherit_name(
     });
 }
 
-fn check_job_steps(
+fn check_job_inherit(
     job: &crate::ast::Job,
     template_names: &HashSet<SmolStr>,
     stage_templates: &HashMap<SmolStr, HashSet<SmolStr>>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    let Some(al) = job.attr_list() else { return };
+    for attr in al.attrs() {
+        if attr.key_text().as_deref() != Some("inherit") {
+            continue;
+        }
+        for name in inherit_names_from_attr(&attr) {
+            check_inherit_name(
+                &name,
+                "job",
+                "this stage or at the top level",
+                template_names,
+                stage_templates,
+                &attr,
+                diagnostics,
+            );
+        }
+    }
+}
+
+fn check_job_steps(job: &crate::ast::Job, diagnostics: &mut Vec<Diagnostic>) {
     let Some(body) = job.steps_body() else {
         return;
     };
-
     let has_inherit = job.attr_list().is_some_and(|al| {
         al.attrs()
             .any(|a| a.key_text().as_deref() == Some("inherit"))
     });
-
-    if has_inherit && let Some(al) = job.attr_list() {
-        for attr in al.attrs() {
-            if attr.key_text().as_deref() != Some("inherit") {
-                continue;
-            }
-            for name in inherit_names_from_attr(&attr) {
-                check_inherit_name(
-                    &name,
-                    "job",
-                    "this stage or at the top level",
-                    template_names,
-                    stage_templates,
-                    &attr,
-                    diagnostics,
-                );
-            }
-        }
-    }
-
     if !has_inherit {
         check_step_reuse(&body, "job", diagnostics);
     }
