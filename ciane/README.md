@@ -75,7 +75,7 @@ providing a name by which the external [`workflow`] will be referenced and a `pa
 located. 
 
 ```ciane
-use deploy { path = ./ci/cianity/deploy.ci }
+use deploy ( path = ./ci/cianity/deploy.ci )
 ```
 
 ### Stage
@@ -162,7 +162,6 @@ job build_debug [
 
 A [`step`]'s body is surrounded by braces and can contain multiple lines of script.
 
-```
 ```ciane
 job build_debug [
     step rustup { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh }

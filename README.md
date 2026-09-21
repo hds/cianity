@@ -177,18 +177,12 @@ Each step is converted into a single line in the GitLab pipeline definition.
 ```ciane
 stage cianity_check {
     job check (
-        inherit = rust_slim,
+        image = rust:1.96-trixie,
         dependencies = [ build.build_release ],
     ) [
         step check { ./target/release/cianity check }
         step format { ./target/release/cianity format --check }
-        step build {
-            ./target/release/cianity build -t gitlab
-        step build {
-            ./target/release/cianity build -t gitlab
-            # TODO: fix this after implementing build --check
-            [ "$(git diff --name-only)" == "" ] || ( echo "error: pipeline doesn't match workflow.ci!"; exit 1 )
-        }
+        step build { ./target/release/cianity build -t gitlab --check }
     ]
 }
 ```

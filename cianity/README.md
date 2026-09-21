@@ -12,10 +12,9 @@ current directory and then going up towards the root of the file system.
 In this case, no file needs to be specified. The rest of this guide will assume that a `workflow.ci`
 file is used.
 
-Most commands also accept `-w/--workflow` to specify a different workflow root or `-f/--file` to
-act on an individual file instead.
+Most commands also accept `-w/--workspace` to specify a different workflow root.
 
-## Lint
+## Check (lint)
 
 To check the validity of a workflow use the `check` command.
 
