@@ -5,8 +5,8 @@ use smol_str::SmolStr;
 
 use crate::{
     ast::{
-        AstNode, Attr, HasAttrList, HasName, Root, Stage, TemplateDef, UseDecl, WorkflowBody,
-        WorkflowDef,
+        AstNode, Attr, AttrList, HasAttrList, HasName, Root, Stage, TemplateDef, UseDecl,
+        WorkflowBody, WorkflowDef,
     },
     error::{Diagnostic, Severity},
 };
@@ -71,8 +71,52 @@ pub(super) fn check_root(root: &Root, diagnostics: &mut Vec<Diagnostic>) {
     for workflow in root.workflow_defs() {
         check_workflow_def(&workflow, diagnostics);
     }
+    let imports_used = imports_used_by_inherits(root);
     for use_decl in root.use_decls() {
         check_use_decl_attrs(&use_decl, diagnostics);
+        check_use_decl_is_used(&use_decl, &imports_used, diagnostics);
+    }
+}
+
+/// The import names that `inherit` references reach for, i.e. the `dep` of
+/// `dep/base`, gathered from every job and template in the file.
+fn imports_used_by_inherits(root: &Root) -> HashSet<SmolStr> {
+    let mut lists: Vec<AttrList> = Vec::new();
+    for tmpl in root.templates() {
+        lists.extend(tmpl.attr_list());
+    }
+    for stage in root.stages() {
+        let Some(body) = stage.body() else { continue };
+        for job in body.jobs() {
+            lists.extend(job.attr_list());
+        }
+        for tmpl in body.templates() {
+            lists.extend(tmpl.attr_list());
+        }
+    }
+
+    lists
+        .iter()
+        .flat_map(AttrList::attrs)
+        .filter(|attr| attr.key_text().as_deref() == Some("inherit"))
+        .flat_map(|attr| inherit_names_from_attr(&attr))
+        .filter_map(|name| name.split_once('/').map(|(import, _)| SmolStr::new(import)))
+        .collect()
+}
+
+/// An import nothing inherits from is dead weight, though harmless.
+fn check_use_decl_is_used(
+    decl: &UseDecl,
+    imports_used: &HashSet<SmolStr>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let Some(name) = decl.name() else { return };
+    if !imports_used.contains(&name) {
+        diagnostics.push(Diagnostic {
+            severity: Severity::Warning,
+            message: format!("import `{name}` is never used"),
+            span: span_without_trivia(decl.syntax()),
+        });
     }
 }
 

@@ -206,10 +206,98 @@ workflow ci {
     use shared ( path = ./shared.ci )
 
     stage build {
+        job compile ( inherit = shared/base ) [
+            steps,
+        ]
+    }
+}
+",
+    );
+}
+
+#[test]
+fn warn_unused_import() {
+    assert_has_diagnostic(
+        r"
+workflow ci {
+    use shared ( path = ./shared.ci )
+
+    stage build {
         job compile { cargo build }
     }
 }
 ",
+        Severity::Warning,
+        "import `shared` is never used",
+    );
+}
+
+#[test]
+fn valid_import_used_by_a_template() {
+    assert_no_diagnostics(
+        r"
+workflow ci {
+    use shared ( path = ./shared.ci )
+
+    template local ( inherit = shared/base ) [
+        steps,
+    ]
+
+    stage build {
+        job compile ( inherit = local ) [
+            steps,
+        ]
+    }
+}
+",
+    );
+}
+
+#[test]
+fn valid_import_used_in_a_list_or_qualified_reference() {
+    assert_no_diagnostics(
+        r"
+workflow ci {
+    use a ( path = ./a.ci )
+    use b ( path = ./b.ci )
+
+    template base [
+        step run { cargo test }
+    ]
+
+    stage build {
+        job one ( inherit = [ base, a/thing ] ) [
+            steps,
+        ]
+
+        job two ( inherit = b/stage.thing ) [
+            steps,
+        ]
+    }
+}
+",
+    );
+}
+
+#[test]
+fn warn_unused_import_only_for_the_unused_one() {
+    let diags = run(r"
+workflow ci {
+    use used ( path = ./used.ci )
+    use spare ( path = ./spare.ci )
+
+    stage build {
+        job compile ( inherit = used/base ) [
+            steps,
+        ]
+    }
+}
+");
+    let unused: Vec<&String> = diags.iter().map(|d| &d.message).collect();
+    assert_eq!(unused.len(), 1, "diagnostics: {unused:?}");
+    assert!(
+        unused[0].contains("`spare`"),
+        "expected the warning to name `spare`: {unused:?}"
     );
 }
 

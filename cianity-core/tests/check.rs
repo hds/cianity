@@ -90,6 +90,22 @@ fn valid_cross_file_template_on_template() {
     assert_check_passes("cross_file_template_on_template");
 }
 
+/// An unused import is worth saying something about, but not worth failing.
+#[test]
+fn valid_unused_import_warns_but_passes() {
+    assert_check_passes("unused_import");
+
+    let path = fixture_path("valid", "unused_import");
+    let diags = check::diagnostics(&path).expect("cannot check unused_import.ci");
+    assert_eq!(diags.len(), 1, "diagnostics: {diags:?}");
+    assert_eq!(diags[0].severity, Severity::Warning);
+    assert!(
+        diags[0].message.contains("import `shared` is never used"),
+        "unexpected message: {}",
+        diags[0].message
+    );
+}
+
 #[test]
 fn valid_dependency_same_stage() {
     assert_check_passes("dependency_same_stage");
