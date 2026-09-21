@@ -1,0 +1,7 @@
+workflow ci {
+    use mid ( path = ./mid.ci )
+
+    stage build {
+        job compile { cargo build }
+    }
+}

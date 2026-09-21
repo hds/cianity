@@ -1,0 +1,9 @@
+workflow ci {
+    use other ( path = ./other.ci )
+
+    stage build {
+        job compile ( inherit = other/base ) [
+            steps,
+        ]
+    }
+}

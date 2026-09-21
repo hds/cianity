@@ -1,4 +1,5 @@
-use std::path::{Path, PathBuf};
+use std::collections::{HashSet, VecDeque};
+use std::path::{Component, Path, PathBuf};
 
 use ciane::{
     ast::{AstNode, Root},
@@ -25,35 +26,134 @@ pub fn resolve_root(file: Option<&Path>, workspace: Option<&Path>) -> anyhow::Re
     }
 }
 
-/// Return the paths of `.ci` files referenced via `use {}` blocks in `root`.
+/// Return the paths of every `.ci` file reachable from `root` through
+/// `use {}` blocks, however deep the imports go.
 ///
-/// Paths are resolved relative to `root`'s parent directory. Files whose
-/// `location` path does not exist on disk are silently skipped.
+/// Paths are resolved relative to the parent of the file the `use` is written
+/// in. Files whose `path` does not exist on disk are silently skipped, and
+/// each file is listed once, which also breaks import loops.
 ///
 /// # Errors
 ///
 /// Returns `Err` if `root` cannot be read.
 pub fn referenced_files(root: &Path) -> anyhow::Result<Vec<PathBuf>> {
-    let source = std::fs::read_to_string(root)
-        .map_err(|e| anyhow::anyhow!("cannot read {}: {e}", root.display()))?;
+    let mut queue: VecDeque<PathBuf> = VecDeque::new();
+    let mut seen: HashSet<PathBuf> = HashSet::new();
+    let mut files: Vec<PathBuf> = Vec::new();
+
+    seen.insert(identity(root));
+    queue.extend(direct_imports(root)?);
+
+    while let Some(path) = queue.pop_front() {
+        if !seen.insert(identity(&path)) {
+            continue;
+        }
+        // A file that can't be read or parsed is reported when it is checked.
+        queue.extend(direct_imports(&path).unwrap_or_default());
+        files.push(path);
+    }
+
+    Ok(files)
+}
+
+/// Return the import loops that `path` is responsible for reporting.
+///
+/// Each loop is the chain of files that closes it, starting and ending at
+/// `path`, e.g. `[workflow.ci, shared.ci, workflow.ci]`.
+///
+/// Every file in a loop can see it, so a loop is reported by just one of
+/// them — the first by path — and the others stay quiet. That way a workspace
+/// check describes each loop once rather than once per file in it.
+#[must_use]
+pub fn import_loops(path: &Path) -> Vec<Vec<PathBuf>> {
+    fn walk(
+        current: &Path,
+        start: &Path,
+        chain: &mut Vec<PathBuf>,
+        visited: &mut HashSet<PathBuf>,
+        loops: &mut Vec<Vec<PathBuf>>,
+    ) {
+        for imported in direct_imports(current).unwrap_or_default() {
+            if identity(&imported) == identity(start) {
+                let mut found = chain.clone();
+                found.push(imported);
+                loops.push(found);
+                continue;
+            }
+            // Only follow each file once: any loop that doesn't come back to
+            // `start` belongs to the files it does run through.
+            if !visited.insert(identity(&imported)) {
+                continue;
+            }
+            chain.push(imported.clone());
+            walk(&imported, start, chain, visited, loops);
+            chain.pop();
+        }
+    }
+
+    let mut loops = Vec::new();
+    let mut visited = HashSet::new();
+    visited.insert(identity(path));
+    walk(
+        path,
+        path,
+        &mut vec![path.to_path_buf()],
+        &mut visited,
+        &mut loops,
+    );
+    loops.retain(|chain| {
+        chain
+            .iter()
+            .map(|file| identity(file))
+            .min()
+            .is_some_and(|first| first == identity(path))
+    });
+    loops
+}
+
+/// The existing files a single file imports through its `use {}` blocks.
+fn direct_imports(path: &Path) -> anyhow::Result<Vec<PathBuf>> {
+    let source = std::fs::read_to_string(path)
+        .map_err(|e| anyhow::anyhow!("cannot read {}: {e}", path.display()))?;
 
     let result = parse(&source);
     let ast_root = Root::cast(result.syntax())
         .ok_or_else(|| anyhow::anyhow!("internal error: parse produced no Root node"))?;
 
-    let base = root.parent().unwrap_or(Path::new("."));
+    let base = path.parent().unwrap_or(Path::new("."));
+    Ok(ast_root
+        .use_decls()
+        .filter_map(|use_decl| {
+            let imported = normalize(&base.join(use_decl.path()?.as_str()));
+            imported.exists().then_some(imported)
+        })
+        .collect())
+}
 
-    let mut paths: Vec<PathBuf> = Vec::new();
-    for use_decl in ast_root.use_decls() {
-        if let Some(loc) = use_decl.path() {
-            let path = base.join(loc.as_str());
-            if path.exists() {
-                paths.push(path);
+/// Remove `.` and `..` components from a path, so that a chain of imports
+/// written as `./ci/shared.ci` doesn't read as `a/./ci/./shared.ci` when it is
+/// reported to the user.
+#[must_use]
+pub fn normalize(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir
+                if matches!(out.components().next_back(), Some(Component::Normal(_))) =>
+            {
+                out.pop();
             }
+            other => out.push(other),
         }
     }
+    out
+}
 
-    Ok(paths)
+/// How a file is recognised as one already visited, so that two spellings of
+/// the same path — or an import loop — don't send us round again.
+fn identity(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
 }
 
 /// Walk up from `start`, returning the first `workflow.ci` or `.workflow.ci`

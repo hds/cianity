@@ -1,5 +1,5 @@
 use std::ops::Range;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use ariadne::{Color, Label, Report, ReportKind, Source};
 use ciane::{
@@ -10,6 +10,7 @@ use ciane::{
 };
 
 use crate::build::ir::{ErrorSite, dependency_errors, lower_with_path_partial};
+use crate::workspace;
 
 /// Read, parse, and validate a `ciane` source file.
 ///
@@ -68,6 +69,7 @@ fn collect_diagnostics(path: &Path, source: &str) -> Vec<Diagnostic> {
 
     if let Some(root) = Root::cast(result.syntax()) {
         diagnostics.extend(validate(&root));
+        check_import_loops(&root, path, &mut diagnostics);
         // Error recovery can leave jobs and templates out of the tree, which
         // would make references to them look like they don't exist.
         if result.errors().is_empty() {
@@ -76,6 +78,49 @@ fn collect_diagnostics(path: &Path, source: &str) -> Vec<Diagnostic> {
     }
 
     diagnostics
+}
+
+/// Report `use` imports that lead back to this file.
+fn check_import_loops(root: &Root, path: &Path, diagnostics: &mut Vec<Diagnostic>) {
+    for chain in workspace::import_loops(path) {
+        let base = common_directory(&chain);
+        let names: Vec<String> = chain
+            .iter()
+            .map(|file| {
+                file.strip_prefix(&base)
+                    .unwrap_or(file)
+                    .display()
+                    .to_string()
+            })
+            .collect();
+        // The second file in the chain is the one this file imports.
+        let span = chain
+            .get(1)
+            .map_or(0..0, |next| import_span(root, path, next));
+        diagnostics.push(Diagnostic {
+            severity: Severity::Error,
+            message: format!("import loop: {}", names.join(" -> ")),
+            span,
+        });
+    }
+}
+
+/// The deepest directory holding every file in `chain`, so that a loop reads
+/// as `ci/a.ci -> ci/b.ci -> workflow.ci` rather than in full.
+fn common_directory(chain: &[PathBuf]) -> PathBuf {
+    let mut base: PathBuf = chain
+        .first()
+        .and_then(|first| first.parent())
+        .unwrap_or(Path::new(""))
+        .to_path_buf();
+    for file in chain {
+        while !file.starts_with(&base) {
+            if !base.pop() {
+                return PathBuf::new();
+            }
+        }
+    }
+    base
 }
 
 /// Report template references that can't be resolved and dependencies that
@@ -163,7 +208,7 @@ fn import_span(root: &Root, path: &Path, file: &Path) -> Range<usize> {
     root.use_decls()
         .find(|imp| {
             imp.path()
-                .is_some_and(|loc| base.join(loc.as_str()) == file)
+                .is_some_and(|loc| crate::workspace::normalize(&base.join(loc.as_str())) == file)
         })
         .map_or(0..0, |imp| span_of(imp.syntax()))
 }

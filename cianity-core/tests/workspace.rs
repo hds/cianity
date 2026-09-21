@@ -216,3 +216,231 @@ fn referenced_files_resolves_paths_relative_to_root_parent() {
         tmp.path().join("shared/helpers.ci").canonicalize().unwrap()
     );
 }
+
+#[test]
+fn referenced_files_follows_imports_transitively() {
+    let tmp = TempDir::new().unwrap();
+    let deep = touch(&tmp, "ci/deep.ci");
+    let mid = write(
+        &tmp,
+        "ci/mid.ci",
+        "workflow mid {\n    use deep ( path = ./deep.ci )\n}\n",
+    );
+    let root = write(
+        &tmp,
+        "workflow.ci",
+        "workflow ci {\n    use mid ( path = ./ci/mid.ci )\n}\n",
+    );
+
+    let refs = workspace::referenced_files(&root).unwrap();
+    assert_eq!(refs.len(), 2, "refs: {refs:?}");
+    for expected in [&mid, &deep] {
+        assert!(
+            refs.iter()
+                .any(|r| r.canonicalize().unwrap() == expected.canonicalize().unwrap()),
+            "{expected:?} missing from {refs:?}"
+        );
+    }
+}
+
+#[test]
+fn referenced_files_breaks_import_loops() {
+    let tmp = TempDir::new().unwrap();
+    // root → a → b → a, and b → root
+    write(
+        &tmp,
+        "a.ci",
+        "workflow a {\n    use b ( path = ./b.ci )\n}\n",
+    );
+    write(
+        &tmp,
+        "b.ci",
+        "workflow b {\n    use a ( path = ./a.ci )\n    use root ( path = ./workflow.ci )\n}\n",
+    );
+    let root = write(
+        &tmp,
+        "workflow.ci",
+        "workflow ci {\n    use a ( path = ./a.ci )\n}\n",
+    );
+
+    let refs = workspace::referenced_files(&root).unwrap();
+    assert_eq!(refs.len(), 2, "each file once, and not the root: {refs:?}");
+}
+
+#[test]
+fn referenced_files_lists_each_file_once() {
+    let tmp = TempDir::new().unwrap();
+    // diamond: root → a, root → b, a → shared, b → shared
+    touch(&tmp, "shared.ci");
+    write(
+        &tmp,
+        "a.ci",
+        "workflow a {\n    use s ( path = ./shared.ci )\n}\n",
+    );
+    write(
+        &tmp,
+        "b.ci",
+        "workflow b {\n    use s ( path = ./shared.ci )\n}\n",
+    );
+    let root = write(
+        &tmp,
+        "workflow.ci",
+        "workflow ci {\n    use a ( path = ./a.ci )\n    use b ( path = ./b.ci )\n}\n",
+    );
+
+    let refs = workspace::referenced_files(&root).unwrap();
+    assert_eq!(refs.len(), 3, "a, b and shared once each: {refs:?}");
+}
+
+#[test]
+fn referenced_files_skips_missing_imports_deeper_in_the_tree() {
+    let tmp = TempDir::new().unwrap();
+    let mid = write(
+        &tmp,
+        "mid.ci",
+        "workflow mid {\n    use gone ( path = ./gone.ci )\n}\n",
+    );
+    let root = write(
+        &tmp,
+        "workflow.ci",
+        "workflow ci {\n    use mid ( path = ./mid.ci )\n}\n",
+    );
+
+    let refs = workspace::referenced_files(&root).unwrap();
+    assert_eq!(refs.len(), 1, "refs: {refs:?}");
+    assert_eq!(refs[0].canonicalize().unwrap(), mid.canonicalize().unwrap());
+}
+
+// ── import_loops ──────────────────────────────────────────────────────────────
+
+/// Loops seen by `file`, rendered as `a.ci -> b.ci -> a.ci` against `base`.
+fn loops_from(file: &std::path::Path, base: &std::path::Path) -> Vec<String> {
+    workspace::import_loops(file)
+        .into_iter()
+        .map(|chain| {
+            chain
+                .iter()
+                .map(|p| p.strip_prefix(base).unwrap_or(p).display().to_string())
+                .collect::<Vec<_>>()
+                .join(" -> ")
+        })
+        .collect()
+}
+
+/// Every loop among `files`, which should be reported by exactly one of them.
+fn all_loops(files: &[PathBuf], base: &std::path::Path) -> Vec<String> {
+    files.iter().flat_map(|f| loops_from(f, base)).collect()
+}
+
+#[test]
+fn import_loops_finds_self_import() {
+    let tmp = TempDir::new().unwrap();
+    let root = write(
+        &tmp,
+        "workflow.ci",
+        "workflow ci {\n    use me ( path = ./workflow.ci )\n}\n",
+    );
+    assert_eq!(
+        loops_from(&root, tmp.path()),
+        vec!["workflow.ci -> workflow.ci"]
+    );
+}
+
+#[test]
+fn import_loops_reports_a_mutual_loop_once() {
+    let tmp = TempDir::new().unwrap();
+    let other = write(
+        &tmp,
+        "other.ci",
+        "workflow other {\n    use root ( path = ./workflow.ci )\n}\n",
+    );
+    let root = write(
+        &tmp,
+        "workflow.ci",
+        "workflow ci {\n    use other ( path = ./other.ci )\n}\n",
+    );
+    assert_eq!(
+        all_loops(&[root, other], tmp.path()),
+        vec!["other.ci -> workflow.ci -> other.ci"],
+        "one report, from the first file by path"
+    );
+}
+
+#[test]
+fn import_loops_reports_a_longer_loop_once() {
+    let tmp = TempDir::new().unwrap();
+    let a = write(
+        &tmp,
+        "a.ci",
+        "workflow a {\n    use b ( path = ./b.ci )\n}\n",
+    );
+    let b = write(
+        &tmp,
+        "b.ci",
+        "workflow b {\n    use root ( path = ./workflow.ci )\n}\n",
+    );
+    let root = write(
+        &tmp,
+        "workflow.ci",
+        "workflow ci {\n    use a ( path = ./a.ci )\n}\n",
+    );
+    assert_eq!(
+        all_loops(&[root, a, b], tmp.path()),
+        vec!["a.ci -> b.ci -> workflow.ci -> a.ci"]
+    );
+}
+
+#[test]
+fn import_loops_empty_when_imports_only_share_files() {
+    let tmp = TempDir::new().unwrap();
+    // diamond, no loop: root -> a -> shared, root -> b -> shared
+    let shared = touch(&tmp, "shared.ci");
+    let a = write(
+        &tmp,
+        "a.ci",
+        "workflow a {\n    use s ( path = ./shared.ci )\n}\n",
+    );
+    let b = write(
+        &tmp,
+        "b.ci",
+        "workflow b {\n    use s ( path = ./shared.ci )\n}\n",
+    );
+    let root = write(
+        &tmp,
+        "workflow.ci",
+        "workflow ci {\n    use a ( path = ./a.ci )\n    use b ( path = ./b.ci )\n}\n",
+    );
+    assert!(
+        all_loops(&[root, a, b, shared], tmp.path()).is_empty(),
+        "a shared import is not a loop"
+    );
+}
+
+#[test]
+fn import_loops_reports_a_loop_the_root_is_not_part_of() {
+    let tmp = TempDir::new().unwrap();
+    // root -> a, and a <-> b
+    let a = write(
+        &tmp,
+        "a.ci",
+        "workflow a {\n    use b ( path = ./b.ci )\n}\n",
+    );
+    let b = write(
+        &tmp,
+        "b.ci",
+        "workflow b {\n    use a ( path = ./a.ci )\n}\n",
+    );
+    let root = write(
+        &tmp,
+        "workflow.ci",
+        "workflow ci {\n    use a ( path = ./a.ci )\n}\n",
+    );
+    assert!(
+        loops_from(&root, tmp.path()).is_empty(),
+        "the root is not in the loop"
+    );
+    assert_eq!(
+        all_loops(&[root, a, b], tmp.path()),
+        vec!["a.ci -> b.ci -> a.ci"]
+    );
+}

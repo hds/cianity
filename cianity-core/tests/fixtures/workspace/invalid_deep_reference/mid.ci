@@ -1,0 +1,7 @@
+workflow mid {
+    use deep ( path = ./deep.ci )
+
+    template shared [
+        step run { cargo test }
+    ]
+}

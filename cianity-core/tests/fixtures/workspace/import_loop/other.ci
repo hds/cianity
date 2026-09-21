@@ -1,0 +1,7 @@
+workflow other {
+    use root ( path = ./workflow.ci )
+
+    template base [
+        step run { cargo test }
+    ]
+}

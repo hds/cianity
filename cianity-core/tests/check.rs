@@ -322,6 +322,21 @@ fn workspace_valid_root_and_referenced() {
 }
 
 #[test]
+fn workspace_invalid_deep_reference() {
+    assert_workspace_fails("invalid_deep_reference");
+}
+
+#[test]
+fn workspace_import_loop_is_an_error() {
+    assert_workspace_fails("import_loop");
+}
+
+#[test]
+fn invalid_import_loop_self() {
+    assert_check_fails("import_loop_self");
+}
+
+#[test]
 fn workspace_invalid_referenced_parse_error() {
     assert_workspace_fails("invalid_referenced_parse_error");
 }

@@ -497,7 +497,12 @@ impl FileTemplates {
         let base = path.parent().unwrap_or(Path::new("."));
         let imports = root
             .use_decls()
-            .filter_map(|imp| Some((imp.name()?.to_string(), base.join(imp.path()?.as_str()))))
+            .filter_map(|imp| {
+                Some((
+                    imp.name()?.to_string(),
+                    crate::workspace::normalize(&base.join(imp.path()?.as_str())),
+                ))
+            })
             .collect();
 
         Self { raw, imports }
