@@ -69,6 +69,7 @@ fn collect_diagnostics(path: &Path, source: &str) -> Vec<Diagnostic> {
 
     if let Some(root) = Root::cast(result.syntax()) {
         diagnostics.extend(validate(&root));
+        check_imports_exist(&root, path, &mut diagnostics);
         check_import_loops(&root, path, &mut diagnostics);
         // Error recovery can leave jobs and templates out of the tree, which
         // would make references to them look like they don't exist.
@@ -78,6 +79,20 @@ fn collect_diagnostics(path: &Path, source: &str) -> Vec<Diagnostic> {
     }
 
     diagnostics
+}
+
+/// Report `use` imports whose file isn't there.
+fn check_imports_exist(root: &Root, path: &Path, diagnostics: &mut Vec<Diagnostic>) {
+    for (name, imported) in workspace::missing_imports(root, path) {
+        diagnostics.push(Diagnostic {
+            severity: Severity::Error,
+            message: format!(
+                "import `{name}` references `{}`, but that file does not exist",
+                imported.display()
+            ),
+            span: import_span(root, path, &imported),
+        });
+    }
 }
 
 /// Report `use` imports that lead back to this file.

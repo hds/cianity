@@ -454,6 +454,19 @@ fn build_fails_on_unknown_step_reference() {
 }
 
 #[test]
+fn build_fails_on_import_file_that_does_not_exist() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/invalid/use_file_missing_unused.ci");
+    let err = build::render_path_to_string(&path, build::Target::Gitlab)
+        .expect_err("a missing import file should not produce output")
+        .to_string();
+    assert!(
+        err.contains("but that file does not exist"),
+        "unexpected error message: {err}"
+    );
+}
+
+#[test]
 fn build_fails_on_unknown_step_reference_in_template() {
     let err = build::render_to_string(
         "workflow ci {

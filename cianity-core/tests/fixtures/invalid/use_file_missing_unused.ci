@@ -1,0 +1,7 @@
+workflow ci {
+    use unused ( path = ../shared/nonexistent.ci )
+
+    stage build {
+        job compile { cargo build }
+    }
+}

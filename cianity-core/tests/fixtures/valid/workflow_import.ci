@@ -1,6 +1,6 @@
 workflow ci
 
-use shared ( path = ./shared.ci )
+use shared ( path = ../shared/templates.ci )
 
 stage build {
     job compile { cargo build --release }

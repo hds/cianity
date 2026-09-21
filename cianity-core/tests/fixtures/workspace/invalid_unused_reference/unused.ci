@@ -1,0 +1,5 @@
+workflow unused {
+    stage build {
+        job compile ( foo = bar ) { cargo build }
+    }
+}

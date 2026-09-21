@@ -123,6 +123,22 @@ fn invalid_inherit_no_use_entry() {
 }
 
 #[test]
+fn invalid_use_file_missing_even_when_unused() {
+    assert_check_fails("use_file_missing_unused");
+}
+
+/// The missing file is reported once, not once per job that inherits it.
+#[test]
+fn use_file_missing_reported_once() {
+    let messages = error_messages("inherit_use_file_missing");
+    let about_import: Vec<&String> = messages
+        .iter()
+        .filter(|m| m.contains("nonexistent.ci"))
+        .collect();
+    assert_eq!(about_import.len(), 1, "messages: {messages:#?}");
+}
+
+#[test]
 fn invalid_inherit_use_file_missing() {
     assert_check_fails("inherit_use_file_missing");
 }
@@ -319,6 +335,11 @@ fn assert_workspace_fails(name: &str) {
 #[test]
 fn workspace_valid_root_and_referenced() {
     assert_workspace_passes("valid_root_and_referenced");
+}
+
+#[test]
+fn workspace_invalid_unused_reference() {
+    assert_workspace_fails("invalid_unused_reference");
 }
 
 #[test]

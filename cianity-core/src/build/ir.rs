@@ -582,14 +582,17 @@ impl TemplateResolver {
             return None;
         };
         if !self.load(&import_path) {
-            self.error(
-                file,
-                name,
-                format!(
-                    "import `{import_name}` references `{}`, but that file cannot be read",
-                    import_path.display()
-                ),
-            );
+            // A missing file is reported for the `use` import itself.
+            if import_path.exists() {
+                self.error(
+                    file,
+                    name,
+                    format!(
+                        "import `{import_name}` references `{}`, but that file cannot be read",
+                        import_path.display()
+                    ),
+                );
+            }
             return None;
         }
         let key = match rest.split_once('.') {

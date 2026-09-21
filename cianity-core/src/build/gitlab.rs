@@ -21,7 +21,7 @@ use super::ir::{self, Job, JobRef, Workflow, WorkflowStrategy};
 pub(super) fn render_source(source: &str) -> anyhow::Result<String> {
     let root = parse_root(source)?;
     let (workflow, lower_errors) = ir::lower_partial(&root);
-    ensure_no_errors(&root, &workflow, &lower_errors)?;
+    ensure_no_errors(&root, &workflow, &lower_errors, &[])?;
     Ok(render(&workflow))
 }
 
@@ -37,7 +37,8 @@ pub(super) fn render_path(path: &Path) -> anyhow::Result<String> {
         std::fs::read_to_string(path).map_err(|e| anyhow::anyhow!("cannot read file: {e}"))?;
     let root = parse_root(&source)?;
     let (workflow, lower_errors) = ir::lower_with_path_partial(&root, path);
-    ensure_no_errors(&root, &workflow, &lower_errors)?;
+    let missing = crate::workspace::missing_imports(&root, path);
+    ensure_no_errors(&root, &workflow, &lower_errors, &missing)?;
     Ok(render(&workflow))
 }
 
@@ -56,11 +57,18 @@ fn ensure_no_errors(
     root: &Root,
     workflow: &Workflow,
     lower_errors: &[ir::LowerError],
+    missing_imports: &[(String, PathBuf)],
 ) -> anyhow::Result<()> {
     let msgs: Vec<String> = validate(root)
         .into_iter()
         .filter(|d| d.severity == Severity::Error)
         .map(|d| d.message)
+        .chain(missing_imports.iter().map(|(name, imported)| {
+            format!(
+                "import `{name}` references `{}`, but that file does not exist",
+                imported.display()
+            )
+        }))
         .chain(lower_errors.iter().map(|e| e.message.clone()))
         .chain(
             ir::dependency_errors(workflow)

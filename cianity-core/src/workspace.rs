@@ -2,7 +2,7 @@ use std::collections::{HashSet, VecDeque};
 use std::path::{Component, Path, PathBuf};
 
 use ciane::{
-    ast::{AstNode, Root},
+    ast::{AstNode, HasName, Root},
     parse,
 };
 
@@ -54,6 +54,25 @@ pub fn referenced_files(root: &Path) -> anyhow::Result<Vec<PathBuf>> {
     }
 
     Ok(files)
+}
+
+/// Return the `use` imports of `root` whose file is not on disk, as pairs of
+/// import name and the path it resolves to.
+///
+/// An import is checked whether or not anything inherits through it: it names
+/// a file the workflow depends on either way.
+#[must_use]
+pub fn missing_imports(root: &Root, path: &Path) -> Vec<(String, PathBuf)> {
+    let base = path.parent().unwrap_or(Path::new("."));
+    root.use_decls()
+        .filter_map(|use_decl| {
+            let imported = normalize(&base.join(use_decl.path()?.as_str()));
+            if imported.exists() {
+                return None;
+            }
+            Some((use_decl.name()?.to_string(), imported))
+        })
+        .collect()
 }
 
 /// Return the import loops that `path` is responsible for reporting.
