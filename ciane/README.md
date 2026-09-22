@@ -283,10 +283,11 @@ If the [`template`] is in another stage, then it must be specified with dot nota
 name needs to be prefixed with a slash `external_workflow/template_name` and also with the stage if
 it isn't a top level template `external_workflow/stage.template_name`.
 
-Multiplw [`template`]s can be specified in a list.
+Multiple [`template`]s can be specified in a list. If at least one of the templates has a body,
+then the keyword [`steps`] can be used to take all the templates' defined steps.
 
 ```ciane
-job build ( inherit = [ rust_slim, base ] )
+job build ( inherit = [ rust_slim, base ] ) [ steps ]
 ```
 
 ### Image
@@ -302,7 +303,24 @@ Specify the container image that the [`job`] will run on.
 - Accepted on: [`job`], [`template`]
 
 In order to have access to output from previously executed jobs, the `dependencies` attribute is
-used to soecify a list of all jobs for which we want dependencies.
+used to specify a list of all jobs for which we want dependencies.
+
+```ciane
+stage build {
+    job build_release (
+        image = rust:1.96-slim-trixie,
+    ) {
+        cargo build $RELEASE_FLAG --workspace
+    } -> [ target/release/cianity ]
+}
+
+stage test {
+    job test_help (
+        image = rust:1.96-slim-trixie,
+        dependencies = [ build.build_release ],
+    ) { ./target/release/cianity -h }
+}
+```
 
 In generated GitLab pipeline, jobs that don't specify dependencies will be explicitly set with an
 empty list to avoid unncessary downloads.

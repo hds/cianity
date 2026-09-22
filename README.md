@@ -75,9 +75,21 @@ workflow main ( strategy = default_branch_and_reviews )
 template rust_slim ( image = rust:1.96-slim-trixie )
 
 stage build {
-    job build_debug ( inherit = rust_slim ) { cargo build --workspace }
+    template build (
+        inherit = rust_slim,
+        variables = ( RELEASE_FLAG = "" ),
+    ) { cargo build $RELEASE_FLAG --workspace }
 
-    job build_release ( inherit = rust_slim ) { cargo build --workspace --release } -> [ target/release/cianity ]
+    job build_debug ( inherit = build ) [
+        steps,
+    ]
+
+    job build_release (
+        inherit = build,
+        variables = ( RELEASE_FLAG = --release ),
+    ) [
+        steps,
+    ] -> [ target/release/cianity ]
 }
 
 stage test {
@@ -99,16 +111,12 @@ stage test {
 
 stage cianity_check {
     job check (
-        inherit = rust_slim,
+        image = rust:1.96-trixie,
         dependencies = [ build.build_release ],
     ) [
         step check { ./target/release/cianity check }
         step format { ./target/release/cianity format --check }
-        step build {
-            ./target/release/cianity build -t gitlab
-            # TODO: fix this after implementing build --check
-            [ "$(git diff --name-only)" == "" ] || ( echo "error: pipeline doesn't match workflow.ci!"; exit 1 )
-        }
+        step build { ./target/release/cianity build -t gitlab --check }
     ]
 }
 ```
@@ -139,9 +147,21 @@ case a path to an artifact, the relese build of the `cianity` binary.
 
 ```ciane
 stage build {
-    job build_debug ( inherit = rust_slim ) { cargo build --workspace }
+    template build (
+        inherit = rust_slim,
+        variables = ( RELEASE_FLAG = "" ),
+    ) { cargo build $RELEASE_FLAG --workspace }
 
-    job build_release ( inherit = rust_slim ) { cargo build --workspace --release } -> [ target/release/cianity ]
+    job build_debug ( inherit = build ) [
+        steps,
+    ]
+
+    job build_release (
+        inherit = build,
+        variables = ( RELEASE_FLAG = --release ),
+    ) [
+        steps,
+    ] -> [ target/release/cianity ]
 }
 ```
 
@@ -172,7 +192,7 @@ stage test {
 }
 ```
 
-Each step is converted into a single line in the GitLab pipeline definition.
+Each step is converted into a single command line invocation in the GitLab pipeline definition.
 
 ```ciane
 stage cianity_check {
@@ -189,7 +209,7 @@ stage cianity_check {
 
 The final stage is the cianity chreck that could normally be placed at the beginning of a workflow
 to ensure that the checked in workflow is correct and that the generated GitLab pipeline
-configuration matches what has been checked in to te repo.
+configuration matches what has been checked into the repo.
 
 See the [ciane crate] for further details on the language.
 
