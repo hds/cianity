@@ -1,5 +1,7 @@
 workflow main ( strategy = default_branch_and_reviews )
 
+template rust ( image = rust:1.96-trixie )
+
 template rust_slim ( image = rust:1.96-slim-trixie )
 
 stage build {
@@ -21,7 +23,7 @@ stage build {
 }
 
 stage test {
-    job test ( image = rust:1.96-trixie ) [
+    job test ( inherit = rust ) [
         step install_nextest { curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin }
         step run_tests { cargo nextest run --workspace }
     ]
@@ -37,9 +39,21 @@ stage test {
     ]
 }
 
+stage docs {
+    job build ( inherit = rust ) [
+        step install_mdbook { curl -sL https://github.com/rust-lang/mdBook/releases/download/v0.5.4/mdbook-v0.5.4-x86_64-unknown-linux-gnu.tar.gz | tar zxf - }
+        step build { ./mdbook build docs }
+    ]
+
+    job fmt ( inherit = rust ) [
+        step install_dprint { curl -fsSL https://dprint.dev/install.sh | sh }
+        step fmt_check { $HOME/.dprint/bin/dprint check }
+    ]
+}
+
 stage cianity_check {
     job check (
-        image = rust:1.96-trixie,
+        inherit = rust,
         dependencies = [ build.build_release ],
     ) [
         step check { ./target/release/cianity check }

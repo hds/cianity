@@ -1,10 +1,6 @@
-# Cianity
+# Cianity Command Line Tool
 
-This crate contains the `cianity` command line tool for working with Ciane workflows. It handles linting and formating Ciane workflows as well as building to GitLab pipeline configuration. It also has a built-in LSP.
-
-See the [`cianity` documentation] for the full details.
-
-[`cianity` documentation]: https://cianity.dev/cianity/command_line_tool.html
+The `cianity` command line tool contains everything there is to work with ciane workflows.
 
 ## Default workflow
 

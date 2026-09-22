@@ -1,0 +1,12 @@
+[book]
+title = "Cianity"
+authors = ["Hayden Stainsby <hds@caffeineconcepts.com>"]
+language = "en"
+src = "src"
+
+[output.html]
+additional-js = ["theme/ciane-highlight.js"]
+git-repository-url = "https://github.com/hds/cianity.git"
+git-repository-icon = "fab-github"
+edit-url-template = "https://github.com/hds/cianity/blob/main/docs/{path}"
+
