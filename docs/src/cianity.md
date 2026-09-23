@@ -1,3 +1,5 @@
+<img src="img/cianity-logo.jpg" alt="Cianity Logo" height="200" style="display: block; margin-left: auto; margin-right: auto; margin-top: 20px">
+
 # Cianity
 
 _Add a bit of sanity to your CI._ Cianity (pronounced _sanity_) is a set of tools for writing CI workflows using the ciane (pronounced _sane_) DSL. Ciane workflows can then be built to a target CI platform's CI definition format. Currently only [GitLab pipelines] are supported.
